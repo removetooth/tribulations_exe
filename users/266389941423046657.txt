@@ -1,0 +1,1 @@
+{'tickets': 9999, 'lastTeam': 381951357470375936, 'immune': False, 'escaped': False}
