@@ -8,7 +8,8 @@ userdefault = {
     'tickets': 0,
     'lastTeam': None,
     'immune': False,
-    'escaped': False
+    'escaped': False,
+    'vote': None
     }
 
 team_ids = [
@@ -37,6 +38,9 @@ op_ids = [266389941423046657, 221992874886037504]
 tribulations_id = 373237751039918098#951647646102200320
 host_id = 266389941423046657#221992874886037504
 
+prizes = ['nuke', 'eliminate', 'revive', 'immunity', 'sabotage', 'fraud', 'thief', 'escape', 'timeout', 'bias', 'swap']
+# transfer is not treated internally as a shop item
+
 helptext = """Use "exe (keyword)" to use a command.
 
 help/commands/? - Show this dialog.
@@ -44,24 +48,31 @@ balance/bal - Check the number of tickets you have.
 shop/prizes - Check the Prize Booth.
 
 == Prize Booth commands ==
-nuke/bomb <team name> - Eliminate an entire team.
+nuke <team> - Eliminate an entire team.
 eliminate <user> - Eliminate another player.
 revive <user> - Revive a teammate.
 immunity - Give yourself voting immunity.
-sabotage <team name> - Sabotage a team and force them into last place.
+sabotage <team> - Sabotage a team and force them into last place.
 fraud - Double your team's votes.
 thief <user> - Steal a user during autobalance.
 escape - Save yourself from the next challenge.
 timeout <user> - Temporarily eliminate a single user.
-bias <team name> - Request espionage.
+bias <team> - Request espionage.
 swap <user> - Ask to swap teams with another user.
-transfer <user> <amount/all> - Transfer tickets to another user."""
+transfer <(amount)/all> <user>- Transfer tickets to another user."""
 
 helpop = """
 
 == Admin commands ==
+kill - Stop the bot.
 refresh - Create user data that might not exist, and update user data that does. Recommended to use after manually assigning a team role.
-tickets <give/remove/set> <user or team> <amount> - Manage currency.
+
+== Host commands ==
+tickets <give/remove/set> <amount> <user or team> - Manage currency.
+start - Mark the start of a challenge. Disables Escape Rope.
+callvote <team> - Call a vote against a team. Ends the active challenge.
+endvote - End the voting period.
+autobalance - Toggle the autobalance period on and off. Enables/disables Thief.
 """
 
 monologue = "You goddamn madman."
@@ -138,14 +149,16 @@ def getAllParticipants(eliminated = False):
     users = list(chain(*teams))
     return users
 
-def getTeamMembers(idno):
-    return getHome().get_role(int(idno)).members if getHome().get_role(int(idno)) else []
+def getTeamMembers(team):
+    if type(team) in [int, str]:
+        team = getHome().get_role(int(team))
+    return team.members if team else []
 
-def tEmbed(text, author = None):
+def tEmbed(text, author = None, colorOverride = None):
     if author:
         author = author if type(author) == int else author.id
     embed = discord.Embed(
-        color = 0x00ff00,
+        color = colorOverride if colorOverride else 0x00ff00,
         #title = (("tribulations/users/<@"+str(author)+">> ") if author else '') + "TRIBULATIONS.EXE",
         description = '```> {text}```'.format(text='\n> '.join(text.split('\n')))
     )
@@ -167,11 +180,46 @@ def getconfu(user):
     conf = stateread("use_confirmations")
     existing = [i for i in conf if i[1] == (user if type(user) == int else user.id)]
     return existing
-    
+
+def transact(user, item):
+    shop = stateread('shop')
+    uid = user if type(user) == int else user.id
+    amt = userread(uid, 'tickets')
+    if shop[item][0] > 0:
+        shop[item][0] -= 1
+    amt -= shop[item][1]
+    statewrite('shop', shop)
+    userwrite(uid, 'tickets', amt)
+
+def findUser(arg):
+    if arg.startswith('<@') and not arg.startswith('<@&'):
+        return getHome().get_member(int(arg.lstrip('<@').strip('>')))
+    elif arg.startswith('<@!'):
+        return getHome().get_member(int(arg.lstrip('<@!').strip('>')))
+    else:
+        user = getHome().get_member_named(arg)
+        if user:
+            return user
+        else:
+            return 'Unable to find user named ' + arg
+
+def findTeam(arg):
+    if arg.startswith('<@&'):
+        return getHome().get_role(int(arg.lstrip('<@&').strip('>')))
+    matches = [getHome().get_role(i) for i in team_ids if getHome().get_role(i) and getHome().get_role(i).name.lower() == arg.lower()]
+    if len(matches) <= 0:
+        return '"'+teamName+'" does not match the name of any participating teams.'
+    return matches[0]
+
+def getTextArg(args, start):
+    return ' '.join([args[i] for i in range(start,len(args))])
+
 
 @client.event
 async def on_ready():
     print('We have logged in as {0.user}'.format(client))
+    game = discord.Game("exe help")
+    await client.change_presence(status=discord.Status.online, activity=game)
 
 @client.event
 async def on_message(message):
@@ -214,28 +262,25 @@ async def on_message(message):
             
 
         elif args[1].lower() == 'transfer':
+            # exe transfer (amount)/all user
             createDataIfNecessary(message.author)
-            if args[2].startswith('<@'):
-                uid = int(args[2].lstrip('<@').strip('>'))
-            else:
-                user = getHome().get_member_named(args[2])
-                if user:
-                    uid = user.id
-                else:
-                    await message.channel.send(embed=tEmbed('Unable to find user with search term ' + args[2], message.author))
-                    return
+            name = getTextArg(args, 3)
+            u = findUser(name)
+            if type(u) == str:
+                await message.channel.send(embed=tEmbed(u, message.author))
+                return
             if not message.author in getAllParticipants():
                 await message.channel.send(embed=tEmbed('You are not in the game and cannot transfer tickets.', message.author))
                 return
-            if uid == message.author.id or uid == client.user.id or not getHome().get_member(uid) in getAllParticipants():
+            if u.id == message.author.id or u.id == client.user.id or not u in getAllParticipants():
                 await message.channel.send(embed=tEmbed('You cannot transfer tickets to this person.', message.author))
                 return
             tix = userread(message.author, 'tickets')
-            if args[3] == 'all':
+            if args[2] == 'all':
                 amt = tix
             else:
                 try:
-                    amt = int(args[3])
+                    amt = int(args[2])
                 except ValueError:
                     await message.channel.send(embed=tEmbed('Please use a number or "all" for the amount.', message.author))
                     return
@@ -248,301 +293,190 @@ async def on_message(message):
                 elif amt == 0:
                     await message.channel.send(embed=tEmbed("Don't waste my time.", message.author))
                     return
-            target = getHome().get_member(uid)
             if gethasconfu(message.author):
                 await message.channel.send(embed=tEmbed('You must first confirm or cancel: ' + ', '.join([i[0].upper() for i in getconfu(message.author)]), message.author))
                 return
-            addconf(['transfer', message.author.id, uid, amt])
-            embed = tEmbed('Transfer {num} tickets to {target}?\nexe confirm - Yes\nexe cancel - No'.format(num=amt,target=target.display_name), message.author)
+            addconf(['transfer', message.author.id, u.id, amt])
+            embed = tEmbed('Transfer {num} tickets to {target}?\nexe confirm - Yes\nexe cancel - No'.format(num=amt,target=u.display_name), message.author)
             await message.channel.send(embed=embed)
             
-
-        elif args[1].lower() in ['bomb', 'nuke']:
+            
+        # === PRIZE BOOTH COMMANDS: ===
+        
+        elif args[1].lower() in prizes:
+            
             if message.author.id in stateread('escape') or not message.author in getAllParticipants():
                 await message.channel.send(embed=tEmbed('You are not in the game and cannot purchase this item.', message.author))
                 return
             amt = userread(message.author, 'tickets')
             shop = stateread('shop')
-            if amt < shop['nuke'][1]:
+            if amt < shop[args[1]][1]:
                 await message.channel.send(embed=tEmbed("You don't have enough tickets for this prize.", message.author))
                 return
-            if shop['nuke'][0] == 0:
+            if shop[args[1]][0] == 0:
                 await message.channel.send(embed=tEmbed("This prize is out of stock.", message.author))
                 return
-            teamName = ' '.join([args[i] for i in range(2,len(args))])
-            matches = [getHome().get_role(i) for i in team_ids if getHome().get_role(i) and getHome().get_role(i).name.lower() == teamName.lower()]
-            if len(matches) > 0:
-                team = matches[0]
-                if gethasconfu(message.author):
-                    await message.channel.send(embed=tEmbed('You must first confirm or cancel: ' + ', '.join([i[0].upper() for i in getconfu(message.author)]), message.author))
+            if gethasconfu(message.author):
+                await message.channel.send(embed=tEmbed('You must first confirm or cancel: ' + ', '.join([i[0].upper() for i in getconfu(message.author)]), message.author))
+                return
+            msgOverride = False
+            colorOverride = None
+            
+
+            if args[1].lower() == 'nuke':
+                teamName = getTextArg(args, 2)
+                team = findTeam(teamName)
+                if type(team) == str:
+                    await message.channel.send(embed=tEmbed(team, message.author))
                     return
+                msgOverride = True
                 if team in message.author.roles:
                     msg = "/!\\ NUCLEAR WARHEAD ARMED /!\\\n\nWARNING: YOU ARE ABOUT TO NUKE YOUR OWN GODDAMN TEAM.\n\nCONTINUING MAY HAVE VERY UNDESIRABLE CONSEQUENCES.\nARE YOU SURE YOU WANT TO CONTINUE?\n\nexe confirm - yes\nexe cancel - NO NO NO NO NO NO NO"
+                    colorOverride = 0xff0000
                     addconf(['friendlynuke', message.author.id, team.id])
                 else:
                     msg = "/!\\ NUCLEAR WARHEAD ARMED /!\\\n\nYou have targeted: {team}\n\nContinuing will eliminate this entire team for {cost} tickets.\nDo you want to continue?\n\nexe confirm - Yes\nexe cancel - No".format(team=team.name, cost=shop['nuke'][1])
                     addconf(['nuke', message.author.id, team.id])
-                await message.channel.send(embed=tEmbed(msg, message.author))
-            else:
-                await message.channel.send(embed=tEmbed('"'+teamName+'" does not match the name of any participating teams.', message.author))
 
-      
-        elif args[1].lower() == 'eliminate':
-            if message.author.id in stateread('escape') or not message.author in getAllParticipants():
-                await message.channel.send(embed=tEmbed('You are not in the game and cannot purchase this item.', message.author))
-                return
-            amt = userread(message.author, 'tickets')
-            shop = stateread('shop')
-            if amt < shop['eliminate'][1]:
-                await message.channel.send(embed=tEmbed("You don't have enough tickets for this prize.", message.author))
-                return
-            if shop['eliminate'][0] == 0:
-                await message.channel.send(embed=tEmbed("This prize is out of stock.", message.author))
-                return
-            if gethasconfu(message.author):
-                await message.channel.send(embed=tEmbed('You must first confirm or cancel: ' + ', '.join([i[0].upper() for i in getconfu(message.author)]), message.author))
-                return
-            if args[2].startswith('<@'):
-                uid = int(args[2].lstrip('<@').strip('>'))
-            else:
-                user = getHome().get_member_named(args[2])
-                if user:
-                    uid = user.id
-                else:
-                    await message.channel.send(embed=tEmbed('Unable to find user with search term ' + args[2], message.author))
+          
+            elif args[1].lower() == 'eliminate':
+                name = getTextArg(args, 2)
+                u = findUser(name)
+                if type(u) == str:
+                    await message.channel.send(embed=tEmbed(u, message.author))
                     return
-            if uid == message.author.id or not getHome().get_member(uid) in getAllParticipants():
-                await message.channel.send(embed=tEmbed("You can't eliminate that person.", message.author))
-                return
-            addconf(['eliminate', message.author.id, uid])
-            msg = "You have chosen to eliminate {target} for {cost} tickets.\n\nDo you wish to continue?\nexe confirm - Yes\nexe cancel - No".format(cost=shop['eliminate'][1], target=getHome().get_member(uid).display_name)
-            await message.channel.send(embed=tEmbed(msg, message.author))
+                if u.id == message.author.id or not u in getAllParticipants():
+                    await message.channel.send(embed=tEmbed("You can't eliminate that person.", message.author))
+                    return
+                addconf(['eliminate', message.author.id, u.id])
+                msg = "You have chosen to eliminate {target}.".format(target=u.display_name)
+            
+
+            elif args[1].lower() == 'revive':
+                name = getTextArg(args, 2)
+                u = findUser(name)
+                if type(u) == str:
+                    await message.channel.send(embed=tEmbed(u, message.author))
+                    return
+                if u.id == message.author.id or not(u in getAllParticipants(eliminated=True)) or userread(u.id, 'lastTeam') != userread(message.author, 'lastTeam'):
+                    await message.channel.send(embed=tEmbed("You can't revive that person.", message.author))
+                    return
+                addconf(['revive', message.author.id, u.id])
+                msg = "You have chosen to revive {target}.".format(target=u.display_name)
+                
+
+            elif args[1].lower() == 'peek':
+                teamName = getTextArg(args, 2)
+                team = findTeam(teamName)
+                if type(team) == str:
+                    await message.channel.send(embed=tEmbed(team, message.author))
+                    return
+                if team.id == userread(message.author, 'lastTeam'):
+                    await message.channel.send(embed=tEmbed("You cannot peek your own team.", message.author))
+                    return
+                peekers = stateread('peekers')
+                if message.author.id in [i[0] for i in peekers]:
+                    await message.channel.send(embed=tEmbed("You are already peeking another team's channel!", message.author))
+                    return
+                addconf(['peek', message.author.id, team_chan_ids[team.id]])
+                msg = "You have chosen to peek {target}'s team channel.".format(target=team.name)
+
+
+            elif args[1].lower() == 'timeout':
+                name = getTextArg(args, 2)
+                u = findUser(name)
+                if type(u) == str:
+                    await message.channel.send(embed=tEmbed(u, message.author))
+                    return
+                if u.id == message.author.id or not u in getAllParticipants():
+                    await message.channel.send(embed=tEmbed("You can't eliminate that person.", message.author))
+                    return
+                addconf(['timeout', message.author.id, u.id])
+                msg = "You have chosen to temporarily eliminate {target}.".format(target=u.display_name)
+                
+
+            elif args[1].lower() == 'sabotage':
+                teamName = getTextArg(args, 2)
+                team = findTeam(teamName)
+                if type(team) == str:
+                    await message.channel.send(embed=tEmbed(team, message.author))
+                    return
+                if team.id == userread(message.author, 'lastTeam'):
+                    await message.channel.send(embed=tEmbed("You cannot sabotage your own team.", message.author))
+                    return
+                sabotage = stateread('sabotage')
+                if sabotage:
+                    await message.channel.send(embed=tEmbed("A team has already been sabotaged!", message.author))
+                    return
+                addconf(['sabotage', message.author.id, team.id])
+                msg = "You have chosen to sabotage {target}.".format(target=team.name)
+                
+
+            elif args[1].lower() == 'bias':
+                teamName = getTextArg(args, 2)
+                team = findTeam(teamName)
+                if type(team) == str:
+                    await message.channel.send(embed=tEmbed(team, message.author))
+                    return
+                if team.id == userread(message.author, 'lastTeam'):
+                    await message.channel.send(embed=tEmbed("You cannot request bias against your own team.", message.author))
+                    return
+                addconf(['bias', message.author.id, team.id])
+                msg = "You have chosen to request insider info on {target} from the host.".format(target=team.name)
+                
+
+            elif args[1].lower() == 'fraud':
+                team = userread(message.author, 'lastTeam')
+                frauds = stateread('frauds')
+                if team in frauds:
+                    await message.channel.send(embed=tEmbed("Your team has already rigged the vote for this challenge.", message.author))
+                    return
+                addconf(['fraud', message.author.id])
+                msg = "You and your team have chosen to shamelessly engage in election fraud."
+                
+
+            elif args[1].lower() == 'escape':
+                active = stateread('challengeActive')
+                escapes = stateread('escape')
+                if active:
+                    await message.channel.send(embed=tEmbed("Escape Rope cannot be used while a challenge is ongoing.", message.author))
+                    return
+                if message.author.id in escapes: # possibly unnecessary
+                    await message.channel.send(embed=tEmbed("You've already used Escape Rope for this challenge.", message.author))
+                    return
+                addconf(['escape', message.author.id])
+                msg = "You have chosen to escape from the next challenge. You will be barred from prizes during this time."
+                
+
+            elif args[1].lower() == 'thief':
+                ab = stateread('autobalance')
+                if not ab:
+                    await message.channel.send(embed=tEmbed("You cannot use Thief outside of autobalance.", message.author))
+                    return
+                userTeam = userread(message.author, "lastTeam")
+                members = getTeamMembers(userTeam)
+                if len(members) >= 4:
+                    await message.channel.send(embed=tEmbed("Your team already has 4 members!", message.author))
+                    return
+                name = getTextArg(args, 2)
+                u = findUser(name)
+                targetTeam = userread(u, "lastTeam")
+                if type(u) == str:
+                    await message.channel.send(embed=tEmbed(u, message.author))
+                    return
+                if targetTeam == userTeam:
+                    await message.channel.send(embed=tEmbed("That person is already on your team!", message.author))
+                    return
+                addconf(['thief', message.author.id, u.id])
+                msg = "You have chosen to steal {0} for your own team.".format(u.display_name)
+
+
+            if not msgOverride:
+                msg = msg + "\n\nThis will cost {cost} tickets.\nDo you wish to continue?\nexe confirm - Yes\nexe cancel - No".format(cost=shop[args[1]][1])
+            await message.channel.send(embed=tEmbed(msg, message.author, colorOverride=colorOverride))
         
-
-        elif args[1].lower() == 'revive':
-            if message.author.id in stateread('escape') or not message.author in getAllParticipants():
-                await message.channel.send(embed=tEmbed('You are not in the game and cannot purchase this item.', message.author))
-                return
-            amt = userread(message.author, 'tickets')
-            shop = stateread('shop')
-            if amt < shop['revive'][1]:
-                await message.channel.send(embed=tEmbed("You don't have enough tickets for this prize.", message.author))
-                return
-            if shop['revive'][0] == 0:
-                await message.channel.send(embed=tEmbed("This prize is out of stock.", message.author))
-                return
-            if gethasconfu(message.author):
-                await message.channel.send(embed=tEmbed('You must first confirm or cancel: ' + ', '.join([i[0].upper() for i in getconfu(message.author)]), message.author))
-                return
-            if args[2].startswith('<@'):
-                uid = int(args[2].lstrip('<@').strip('>'))
-            else:
-                user = getHome().get_member_named(args[2])
-                if user:
-                    uid = user.id
-                else:
-                    await message.channel.send(embed=tEmbed('Unable to find user with search term ' + args[2], message.author))
-                    return
-            if uid == message.author.id or not(getHome().get_member(uid) in getAllParticipants(True)) or userread(uid, 'lastTeam') != userread(message.author, 'lastTeam'):
-                await message.channel.send(embed=tEmbed("You can't revive that person.", message.author))
-                return
-            addconf(['revive', message.author.id, uid])
-            msg = "You have chosen to revive {target} for {cost} tickets.\n\nDo you wish to continue?\nexe confirm - Yes\nexe cancel - No".format(cost=shop['eliminate'][1], target=getHome().get_member(uid).display_name)
-            await message.channel.send(embed=tEmbed(msg, message.author))
-            
-
-        elif args[1].lower() == 'peek':
-            if message.author.id in stateread('escape') or not message.author in getAllParticipants():
-                await message.channel.send(embed=tEmbed('You are not in the game and cannot purchase this item.', message.author))
-                return
-            amt = userread(message.author, 'tickets')
-            shop = stateread('shop')
-            if amt < shop['peek'][1]:
-                await message.channel.send(embed=tEmbed("You don't have enough tickets for this prize.", message.author))
-                return
-            if shop['peek'][0] == 0:
-                await message.channel.send(embed=tEmbed("This prize is out of stock.", message.author))
-                return
-            if gethasconfu(message.author):
-                await message.channel.send(embed=tEmbed('You must first confirm or cancel: ' + ', '.join([i[0].upper() for i in getconfu(message.author)]), message.author))
-                return
-            teamName = ' '.join([args[i] for i in range(2,len(args))])
-            matches = [getHome().get_role(i) for i in team_ids if getHome().get_role(i) and getHome().get_role(i).name.lower() == teamName.lower()]
-            if len(matches) <= 0:
-                await message.channel.send(embed=tEmbed('"'+teamName+'" does not match the name of any participating teams.', message.author))
-                return
-            team = matches[0]
-            if team.id == userread(message.author, 'lastTeam'):
-                await message.channel.send(embed=tEmbed("You cannot peek your own team.", message.author))
-                return
-            peekers = stateread('peekers')
-            if message.author.id in [i[0] for i in peekers]:
-                await message.channel.send(embed=tEmbed("You are already peeking another team's channel!", message.author))
-                return
-            addconf(['peek', message.author.id, team_chan_ids[team.id]])
-            msg = "You have chosen to peek {target}'s team channel for {cost} tickets.\n\nDo you wish to continue?\nexe confirm - Yes\nexe cancel - No".format(cost=shop['peek'][1], target=team.name)
-            await message.channel.send(embed=tEmbed(msg, message.author))
-
-
-        elif args[1].lower() == 'timeout':
-            if message.author.id in stateread('escape') or not message.author in getAllParticipants():
-                await message.channel.send(embed=tEmbed('You are not in the game and cannot purchase this item.', message.author))
-                return
-            amt = userread(message.author, 'tickets')
-            shop = stateread('shop')
-            if amt < shop['timeout'][1]:
-                await message.channel.send(embed=tEmbed("You don't have enough tickets for this prize.", message.author))
-                return
-            if shop['timeout'][0] == 0:
-                await message.channel.send(embed=tEmbed("This prize is out of stock.", message.author))
-                return
-            if gethasconfu(message.author):
-                await message.channel.send(embed=tEmbed('You must first confirm or cancel: ' + ', '.join([i[0].upper() for i in getconfu(message.author)]), message.author))
-                return
-            if args[2].startswith('<@'):
-                uid = int(args[2].lstrip('<@').strip('>'))
-            else:
-                user = getHome().get_member_named(args[2])
-                if user:
-                    uid = user.id
-                else:
-                    await message.channel.send(embed=tEmbed('Unable to find user with search term ' + args[2], message.author))
-                    return
-            if uid == message.author.id or not getHome().get_member(uid) in getAllParticipants():
-                await message.channel.send(embed=tEmbed("You can't eliminate that person.", message.author))
-                return
-            addconf(['timeout', message.author.id, uid])
-            msg = "You have chosen to temporarily eliminate {target} for {cost} tickets.\n\nDo you wish to continue?\nexe confirm - Yes\nexe cancel - No".format(cost=shop['timeout'][1], target=getHome().get_member(uid).display_name)
-            await message.channel.send(embed=tEmbed(msg, message.author))
-
-        elif args[1].lower() == 'sabotage':
-            if message.author.id in stateread('escape') or not message.author in getAllParticipants():
-                await message.channel.send(embed=tEmbed('You are not in the game and cannot purchase this item.', message.author))
-                return
-            amt = userread(message.author, 'tickets')
-            shop = stateread('shop')
-            if amt < shop['sabotage'][1]:
-                await message.channel.send(embed=tEmbed("You don't have enough tickets for this prize.", message.author))
-                return
-            if shop['sabotage'][0] == 0:
-                await message.channel.send(embed=tEmbed("This prize is out of stock.", message.author))
-                return
-            if gethasconfu(message.author):
-                await message.channel.send(embed=tEmbed('You must first confirm or cancel: ' + ', '.join([i[0].upper() for i in getconfu(message.author)]), message.author))
-                return
-            teamName = ' '.join([args[i] for i in range(2,len(args))])
-            matches = [getHome().get_role(i) for i in team_ids if getHome().get_role(i) and getHome().get_role(i).name.lower() == teamName.lower()]
-            if len(matches) <= 0:
-                await message.channel.send(embed=tEmbed('"'+teamName+'" does not match the name of any participating teams.', message.author))
-                return
-            team = matches[0]
-            if team.id == userread(message.author, 'lastTeam'):
-                await message.channel.send(embed=tEmbed("You cannot sabotage your own team.", message.author))
-                return
-            sabotage = stateread('sabotage')
-            if sabotage:
-                await message.channel.send(embed=tEmbed("A team has already been sabotaged!", message.author))
-                return
-            addconf(['sabotage', message.author.id, team.id])
-            msg = "You have chosen to sabotage {target} for {cost} tickets.\n\nDo you wish to continue?\nexe confirm - Yes\nexe cancel - No".format(cost=shop['sabotage'][1], target=team.name)
-            await message.channel.send(embed=tEmbed(msg, message.author))
-            
-
-        elif args[1].lower() == 'bias':
-            if message.author.id in stateread('escape') or not message.author in getAllParticipants():
-                await message.channel.send(embed=tEmbed('You are not in the game and cannot purchase this item.', message.author))
-                return
-            amt = userread(message.author, 'tickets')
-            shop = stateread('shop')
-            if amt < shop['bias'][1]:
-                await message.channel.send(embed=tEmbed("You don't have enough tickets for this prize.", message.author))
-                return
-            if shop['bias'][0] == 0:
-                await message.channel.send(embed=tEmbed("This prize is out of stock.", message.author))
-                return
-            if gethasconfu(message.author):
-                await message.channel.send(embed=tEmbed('You must first confirm or cancel: ' + ', '.join([i[0].upper() for i in getconfu(message.author)]), message.author))
-                return
-            teamName = ' '.join([args[i] for i in range(2,len(args))])
-            matches = [getHome().get_role(i) for i in team_ids if getHome().get_role(i) and getHome().get_role(i).name.lower() == teamName.lower()]
-            if len(matches) <= 0:
-                await message.channel.send(embed=tEmbed('"'+teamName+'" does not match the name of any participating teams.', message.author))
-                return
-            team = matches[0]
-            if team.id == userread(message.author, 'lastTeam'):
-                await message.channel.send(embed=tEmbed("You cannot request bias against your own team.", message.author))
-                return
-            addconf(['bias', message.author.id, team.id])
-            msg = "You have chosen to request insider info on {target} from the host for {cost} tickets.\n\nDo you wish to continue?\nexe confirm - Yes\nexe cancel - No".format(cost=shop['bias'][1], target=team.name)
-            await message.channel.send(embed=tEmbed(msg, message.author))
-            
-
-        elif args[1].lower() == 'fraud':
-            if message.author.id in stateread('escape') or not message.author in getAllParticipants():
-                await message.channel.send(embed=tEmbed('You are not in the game and cannot purchase this item.', message.author))
-                return
-            amt = userread(message.author, 'tickets')
-            shop = stateread('shop')
-            if amt < shop['fraud'][1]:
-                await message.channel.send(embed=tEmbed("You don't have enough tickets for this prize.", message.author))
-                return
-            if shop['fraud'][0] == 0:
-                await message.channel.send(embed=tEmbed("This prize is out of stock.", message.author))
-                return
-            if gethasconfu(message.author):
-                await message.channel.send(embed=tEmbed('You must first confirm or cancel: ' + ', '.join([i[0].upper() for i in getconfu(message.author)]), message.author))
-                return
-            team = userread(message.author, 'lastTeam')
-            frauds = stateread('frauds')
-            if team in frauds:
-                await message.channel.send(embed=tEmbed("Your team has already rigged the vote for this challenge.", message.author))
-                return
-            addconf(['fraud', message.author.id])
-            msg = "You have chosen to shamelessly engage in election fraud for {cost} tickets.\n\nDo you wish to continue?\nexe confirm - Yes\nexe cancel - No".format(cost=shop['fraud'][1])
-            await message.channel.send(embed=tEmbed(msg, message.author))
-            
-
-        elif args[1].lower() == 'escape':
-            if message.author.id in stateread('escape') or not message.author in getAllParticipants():
-                await message.channel.send(embed=tEmbed('You are not in the game and cannot purchase this item.', message.author))
-                return
-            amt = userread(message.author, 'tickets')
-            shop = stateread('shop')
-            active = stateread('challengeActive')
-            if active:
-                await message.channel.send(embed=tEmbed("Escape Rope cannot be used while a challenge is ongoing.", message.author))
-                return
-            if amt < shop['escape'][1]:
-                await message.channel.send(embed=tEmbed("You don't have enough tickets for this prize.", message.author))
-                return
-            if shop['escape'][0] == 0:
-                await message.channel.send(embed=tEmbed("This prize is out of stock.", message.author))
-                return
-            if gethasconfu(message.author):
-                await message.channel.send(embed=tEmbed('You must first confirm or cancel: ' + ', '.join([i[0].upper() for i in getconfu(message.author)]), message.author))
-                return
-            addconf(['escape', message.author.id])
-            msg = "You have chosen to escape from the next challenge for {cost} tickets.\nYou will be barred from prizes during this time.\n\nDo you wish to continue?\nexe confirm - Yes\nexe cancel - No".format(cost=shop['escape'][1])
-            await message.channel.send(embed=tEmbed(msg, message.author))
-
-
-        
-        elif args[1].lower() == 'eliminate':
-            if message.author.id in stateread('escape') or not message.author in getAllParticipants():
-                await message.channel.send(embed=tEmbed('You are not in the game and cannot purchase this item.', message.author))
-                return
-            amt = userread(message.author, 'tickets')
-            shop = stateread('shop')
-            if amt < shop['eliminate'][1]:
-                await message.channel.send(embed=tEmbed("You don't have enough tickets for this prize.", message.author))
-                return
-            if shop['eliminate'][0] == 0:
-                await message.channel.send(embed=tEmbed("This prize is out of stock.", message.author))
-                return
-            if gethasconfu(message.author):
-                await message.channel.send(embed=tEmbed('You must first confirm or cancel: ' + ', '.join([i[0].upper() for i in getconfu(message.author)]), message.author))
-                return
-            
+                
+        # === END OF PRIZE COMMANDS ===
 
         elif args[1].lower() == 'cancel':
             conf = stateread('use_confirmations')
@@ -578,141 +512,100 @@ async def on_message(message):
                 await message.channel.send(embed=tEmbed(success_msg, message.author))
 
             if action[0] == 'nuke':
+                transact(message.author, 'nuke')
                 for u in getTeamMembers(action[2]):
                     await u.add_roles(getHome().get_role(role_elim_id))
                     await u.remove_roles(getHome().get_role(action[2]))
                     userwrite(u, 'lastTeam', action[2])
-                shop = stateread('shop')
-                amt = userread(message.author, 'tickets')
-                shop['nuke'][0] -= 1
-                amt -= shop['nuke'][1]
-                statewrite('shop', shop)
-                userwrite(message.author, 'tickets', amt)
                 await message.channel.send(embed=tEmbed("Now we are all sons of bitches.", message.author))
 
             if action[0] == 'friendlynuke':
                 addconf(['nukemyownteamforrealsies', action[1], action[2]])
                 finalwarning = "ARE YOU *ABSOLUTELY, 100% SURE* YOU WANT TO DO THIS?\n\nexe confirm - PLEASE\nexe cancel - DO NOT."
-                await message.channel.send(embed=tEmbed(finalwarning, message.author))
+                await message.channel.send(embed=tEmbed(finalwarning, message.author, colorOverride=0xffa500))
 
             if action[0] == 'nukemyownteamforrealsies':
+                transact(message.author, 'nuke')
                 for u in getTeamMembers(action[2]):
                     await u.add_roles(getHome().get_role(role_elim_id))
                     await u.remove_roles(getHome().get_role(action[2]))
                     userwrite(u, 'lastTeam', action[2])
-                shop = stateread('shop')
-                amt = userread(message.author, 'tickets')
-                shop['nuke'][0] -= 1
-                amt -= shop['nuke'][1]
-                statewrite('shop', shop)
-                userwrite(message.author, 'tickets', amt)
                 await message.channel.send(embed=tEmbed(monologue, message.author))
 
             if action[0] == 'eliminate':
+                transact(message.author, 'eliminate')
                 u = getHome().get_member(action[2])
                 await u.add_roles(getHome().get_role(role_elim_id))
                 await u.remove_roles(getHome().get_role(userread(u, 'lastTeam')))
-                shop = stateread('shop')
-                amt = userread(message.author, 'tickets')
-                shop['eliminate'][0] -= 1
-                amt -= shop['eliminate'][1]
-                statewrite('shop', shop)
-                userwrite(message.author, 'tickets', amt)
                 await message.channel.send(embed=tEmbed("== TRANSACTION SUCCESSFUL ==\n\nYou have eliminated {0}.".format(u.display_name), message.author))
 
             if action[0] == 'revive':
+                transact(message.author, 'revive')
                 u = getHome().get_member(action[2])
                 await u.add_roles(getHome().get_role(userread(u, 'lastTeam')))
                 await u.remove_roles(getHome().get_role(role_elim_id))
-                shop = stateread('shop')
-                amt = userread(message.author, 'tickets')
-                shop['revive'][0] -= 1
-                amt -= shop['revive'][1]
-                statewrite('shop', shop)
-                userwrite(message.author, 'tickets', amt)
                 await message.channel.send(embed=tEmbed("== TRANSACTION SUCCESSFUL ==\n\nWelcome back, {0}!".format(u.display_name), message.author))
 
             if action[0] == 'peek':
+                transact(message.author, 'peek')
                 channel = getHome().get_channel(action[2])
                 await channel.set_permissions(message.author, read_messages=True, send_messages=False, add_reactions=False)
-                shop = stateread('shop')
-                amt = userread(message.author, 'tickets')
-                shop['peek'][0] -= 1
-                amt -= shop['peek'][1]
-                statewrite('shop', shop)
-                userwrite(message.author, 'tickets', amt)
                 peekers = stateread('peekers')
                 peekers.append([action[1], action[2]])
                 statewrite('peekers', peekers)
                 await message.channel.send(embed=tEmbed("== TRANSACTION SUCCESSFUL ==\n\nYou have special eyes.", message.author))
 
             if action[0] == 'timeout':
+                transact(message.author, 'timeout')
                 u = getHome().get_member(action[2])
                 await u.add_roles(getHome().get_role(role_elim_id))
                 await u.remove_roles(getHome().get_role(userread(u, 'lastTeam')))
-                shop = stateread('shop')
-                amt = userread(message.author, 'tickets')
-                shop['timeout'][0] -= 1
-                amt -= shop['timeout'][1]
-                statewrite('shop', shop)
-                userwrite(message.author, 'tickets', amt)
                 timeouts = stateread('timeouts')
                 timeouts.append(u.id)
                 statewrite('timeouts', timeouts)
                 await message.channel.send(embed=tEmbed("== TRANSACTION SUCCESSFUL ==\n\nYou have eliminated {0} for this challenge.".format(u.display_name), message.author))
 
             if action[0] == 'sabotage':
+                transact(message.author, 'sabotage')
                 role = getHome().get_role(action[2])
-                shop = stateread('shop')
-                amt = userread(message.author, 'tickets')
-                shop['sabotage'][0] -= 1
-                amt -= shop['sabotage'][1]
-                statewrite('shop', shop)
-                userwrite(message.author, 'tickets', amt)
                 statewrite('sabotage', action[2])
                 await message.channel.send(embed=tEmbed("== TRANSACTION SUCCESSFUL ==\n\n{0} can no longer participate in this challenge, and automatically loses.".format(role.name), message.author))
 
             if action[0] == 'bias':
+                transact(message.author, 'bias')
                 role = getHome().get_role(action[2])
-                shop = stateread('shop')
-                amt = userread(message.author, 'tickets')
-                shop['bias'][0] -= 1
-                amt -= shop['bias'][1]
-                statewrite('shop', shop)
-                userwrite(message.author, 'tickets', amt)
                 await message.channel.send(embed=tEmbed("== TRANSACTION SUCCESSFUL ==\n\nYou are the favorite team. For now.", message.author))
                 await client.get_user(host_id).send(str(message.author) + " used Bias and requests info on " + role.name + ".")
 
             if action[0] == 'fraud':
-                shop = stateread('shop')
-                amt = userread(message.author, 'tickets')
-                shop['fraud'][0] -= 1
-                amt -= shop['fraud'][1]
-                statewrite('shop', shop)
-                userwrite(message.author, 'tickets', amt)
+                transact(message.author, 'fraud')
                 frauds = stateread('frauds')
                 frauds.append(userread(message.author, 'lastTeam'))
                 statewrite('frauds', frauds)
                 await message.channel.send(embed=tEmbed("== TRANSACTION SUCCESSFUL ==\n\nYou suddenly feel like your vote matters. Like, a lot.", message.author))
 
             if action[0] == 'escape':
-                shop = stateread('shop')
-                amt = userread(message.author, 'tickets')
-                shop['escape'][0] -= 1
-                amt -= shop['escape'][1]
-                statewrite('shop', shop)
-                userwrite(message.author, 'tickets', amt)
+                transact(message.author, 'escape')
                 escape = stateread('escape')
                 escape.append(message.author.id)
                 statewrite('escape', escape)
                 await message.channel.send(embed=tEmbed("== TRANSACTION SUCCESSFUL ==\n\nYou will not be part of the next challenge.", message.author))
 
-        elif args[1].lower() == 'start' and int(message.author.id) in op_ids:#== host_id:
+            if action[0] == 'thief':
+                transact(message.author, 'thief')
+                u = getHome().get_member(action[2])
+                role = getHome().get_role(userread(message.author, 'lastTeam'))
+                await u.add_roles(role)
+                await u.remove_roles(getHome().get_role(userread(u, 'lastTeam')))
+                userwrite(u, 'lastTeam', role.id)
+                await message.channel.send(embed=tEmbed("== TRANSACTION SUCCESSFUL ==\n\n{target} has been abducted by {team}!".format(target=u.display_name, team=role.name), message.author))
+
+        elif args[1].lower() == 'start' and message.author.id in op_ids:#== host_id:
             statewrite('challengeActive', True)
             await message.channel.send("Challenge started. Escape Rope can no longer be used.")
                 
         # change this to voting later
-        elif args[1].lower() == 'callvote' and int(message.author.id) in op_ids:#== host_id:
+        elif args[1].lower() == 'callvote' and message.author.id in op_ids:#== host_id:
             statewrite('challengeActive', False)
             peekers = stateread('peekers')
             
@@ -739,10 +632,11 @@ async def on_message(message):
 
             # at some point you will need to do statewrite('escape', [])
 
-        elif args[1].lower() == 'autobalance' and int(message.author.id) in op_ids:#== host_id:
+        elif args[1].lower() == 'autobalance' and message.author.id in op_ids:#== host_id:
             ab = stateread('autobalance')
             statewrite('autobalance', not(ab))
             await message.channel.send("Autobalance period has " + {False:"ended. THIEF can no longer be used.", True:"begun. THIEF can now be used."}[not(ab)])
+
 
         elif args[1].lower() == 'refresh' and message.author.id in op_ids:
             users = getAllParticipants(eliminated = True)
@@ -751,58 +645,51 @@ async def on_message(message):
                 for j in getTeamMembers(i):
                     userwrite(j, "lastTeam", i)
             await message.channel.send("data created & updated for all participants")
+
+
+        elif args[1].lower() == 'kill' and message.author.id in op_ids:
+            await message.channel.send('stopping')
+            await client.close()
             
 
-        elif args[1].lower() == 'tickets' and int(message.author.id) in op_ids:
+        elif args[1].lower() == 'tickets' and message.author.id in op_ids:
+            # exe tickets give/remove/set amount user/team
             resp = {
                 'give': 'Granted {num} tickets to {subject}.',
                 'remove': 'Took {num} tickets from {subject}.',
                 'set': "Set {subject}'s ticket balance to {num}."
                 }
-            if args[3].startswith("<@&"):
-                members = getTeamMembers(args[3].lstrip("<@&").strip(">"))
-                for member in members:
-                    createDataIfNecessary(member.id)
-                    tickets = userread(member.id, 'tickets')
-                    if args[2] == 'give':
-                        tickets += int(args[4])
-                    elif args[2] == 'remove':
-                        tickets -= int(args[4])
-                    elif args[2] == 'set':
-                        await message.channel.send("You probably shouldn't do that.")
-                        return
-                    userwrite(member.id, 'tickets', tickets)
-                    await message.channel.send(resp[args[2]].format(num=args[4], subject=args[3]))
-                    
-            elif args[3].startswith("<@"):
-                uid = int(args[3].lstrip("<@").strip(">"))
-                createDataIfNecessary(uid)
-                tickets = userread(uid, 'tickets')
+            name = getTextArg(args, 4)
+            u = findUser(name)
+            if not type(u) == str:
+                createDataIfNecessary(u)
+                tickets = userread(u, 'tickets')
                 if args[2] == 'give':
-                    tickets += int(args[4])
+                    tickets += int(args[3])
                 elif args[2] == 'remove':
-                    tickets -= int(args[4])
+                    tickets -= int(args[3])
                 elif args[2] == 'set':
-                    tickets = int(args[4])
-                userwrite(uid, 'tickets', tickets)
-                await message.channel.send(resp[args[2]].format(num=args[4], subject=args[3]))
-                
+                    tickets = int(args[3])
+                userwrite(u, 'tickets', tickets)
+                await message.channel.send(resp[args[2]].format(num=args[3], subject=u.display_name))
             else:
-                target = getHome().get_member_named(args[3])
-                if target:
-                    createDataIfNecessary(target.id)
-                    tickets = userread(target.id, 'tickets')
-                    if args[2] == 'give':
-                        tickets += int(args[4])
-                    elif args[2] == 'remove':
-                        tickets -= int(args[4])
-                    elif args[2] == 'set':
-                        tickets = int(args[4])
-                    userwrite(target.id, 'tickets', tickets)
-                    await message.channel.send(resp[args[2]].format(num=args[4], subject=target.mention))
-                else:
-                    await message.channel.send('Unable to find user with search term ' + args[3])
+                team = findTeam(name)
+                if type(team) == str:
+                    await message.channel.send("Unable to find user or team with name " + args[4])
                     return
+                members = getTeamMembers(team)
+                for member in members:
+                    createDataIfNecessary(member)
+                    tickets = userread(member, 'tickets')
+                    if args[2] == 'give':
+                        tickets += int(args[3])
+                    elif args[2] == 'remove':
+                        tickets -= int(args[3])
+                    elif args[2] == 'set':
+                        await message.channel.send("You probably shouldn't do that. (TODO: add a confirmation dialog)")
+                        return
+                    userwrite(member, 'tickets', tickets)
+                    await message.channel.send(resp[args[2]].format(num=args[3], subject=team.name))
             
             
                         
