@@ -35,7 +35,7 @@ statedefault = {
         'timeout': [4, 90, 'For one challenge, you can choose to have a member from another team be eliminated.'],
         'peek': [3, 65, "Team Peek. Allow a teammate to see inside another team's channel for one challenge."],
         'bias': [5, 40, 'Host bias. I will explain to you with a tinge of vagueness about the current actions of any team of your choice.'],
-        'transfer': [-1, '??', 'Ticket Transfer. Transfer an allotted amount of tickets to another player with no extra cost.'],
+        'transfer': [-1, 0, 'Ticket Transfer. Transfer an allotted amount of tickets to another player with no extra cost.'],
         'swap': [-1, 0, 'Swap. As long as the two players consent, you can swap teams with no extra charge. Not usable during the process of voting for elimination.']},
     'swap_requests': [],
     'use_confirmations': [],
