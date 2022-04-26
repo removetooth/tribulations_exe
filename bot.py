@@ -79,7 +79,8 @@ callvote <team> - Call a vote against a team. Ends the active challenge.
 endvote - End the voting period. Eliminates the loser.
 autobalance - Toggle the autobalance period on and off. Enables/disables Thief.
 changeprize <item> <stock/cost/desc> <value> - Edit prizes.
-toggleitem <item> - Toggle the ability to purchase a prize."""
+toggleitem <item> - Toggle the ability to purchase a prize.
+tally - Check the current vote tally."""
 
 monologue = "You goddamn madman."
 """... Fine.
@@ -897,6 +898,28 @@ async def on_message(message):
                 bans.append(args[2])
                 await message.channel.send('Item {0} can no longer be bought.'.format(args[2].upper()))
             statewrite('bannedItems', bans)
+
+
+        elif args[1].lower() == 'tally' and message.author.id == host_id and stateread('votingActive'):
+            tally = {i: 0 for i in stateread('votingOpts')}
+            frauds = stateread('frauds')
+            for tid in team_ids:
+                for member in getTeamMembers(tid):
+                    vote = userread(member, 'vote')
+                    if not vote:
+                        continue
+                    if vote == member.id:
+                        voteNum = 3
+                    elif member.id in tally:
+                        voteNum = 2
+                    else:
+                        voteNum = 1
+                    if tid in frauds:
+                        voteNum = voteNum * 2
+                    tally[vote] = tally[vote] + voteNum
+            text_tally = '\n'.join(['<@{user}>: {votes} votes'.format(user=i, votes=tally[i]) for i in tally])
+            embed = discord.Embed(title='Current Tally', description = text_tally, color = 0x00ff00)
+            await message.author.send(embed=embed)
 
 
         elif args[1].lower() == 'vote' and stateread('votingActive') and message.author in getAllParticipants() and int(args[2]) <= len(stateread("votingOpts")):
