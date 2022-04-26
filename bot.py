@@ -11,7 +11,7 @@
 # Token goes in token.txt.
 # I reset the old one so no one can use it.
 
-import discord, ast, time
+import discord, ast, time, random
 from itertools import chain
 
 intents = discord.Intents.default()
@@ -307,6 +307,7 @@ def findUser(arg):
             return 'Unable to find user named "' + arg + '". (get_member_named() is case sensitive!)'
 
 def findTeam(arg):
+    # find team by name or reference
     if arg.startswith('<@&'):
         return getHome().get_role(int(arg.lstrip('<@&').strip('>')))
     matches = [getHome().get_role(i) for i in team_ids if getHome().get_role(i) and getHome().get_role(i).name.lower() == arg.lower()]
@@ -315,8 +316,27 @@ def findTeam(arg):
     return matches[0]
 
 def getTextArg(args, start):
+    # get text with spaces from a specific argument onwards
     return ' '.join([args[i] for i in range(start,len(args))])
 
+def distributeTickets(amt, users):
+    # distribute amt tickets as evenly as possible between a list of users.
+    # CRACKPOT IDEA
+    # calculate number of tickets modulo number of users
+    rem = amt % len(users)
+    # subtract that from the number of tickets to get the base amount to give everyone
+    base = amt - rem
+    # choose rem amount of users at random to get 1 more ticket than base
+    extras = [users.pop(random.randint(0, len(users)-1)) for i in range(rem)] # (this automatically separates them)
+    for u in extras:
+        tickets = userread(u, "tickets")
+        tickets += (base + 1)
+        userwrite(u, "tickets", tickets)
+    # give base amount of tickets to everyone else
+    for u in users:
+        tickets = userread(u, "tickets")
+        tickets += base
+        userwrite(u, "tickets", tickets)
 
 
 @client.event
@@ -637,7 +657,10 @@ async def on_message(message):
                 
 
             if not msgOverride:
-                msg = msg + "\n\nThis will cost {cost} tickets.\nDo you wish to continue?\nexe confirm - Yes\nexe cancel - No".format(cost=shop[args[1]][1])
+                msg = msg + "\n\nThis will cost {cost} tickets.{stock}\nDo you wish to continue?\nexe confirm - Yes\nexe cancel - No".format(
+                    cost=shop[args[1]][1],
+                    stock="\n{0} of this item will remain.".format(shop[args[1]][0]) if shop[args[1]][0] > 0 else ""
+                    )
             await message.channel.send(embed=tEmbed(msg, message.author, colorOverride=colorOverride))
         
                 
@@ -716,11 +739,14 @@ async def on_message(message):
                 await message.channel.send(embed=tEmbed(success_msg, message.author))
 
             if action[0] == 'nuke':
-                
+                ticketTotal = 0
                 for u in getTeamMembers(action[2]):
                     await u.add_roles(getHome().get_role(role_elim_id))
                     await u.remove_roles(getHome().get_role(action[2]))
                     userwrite(u, 'lastTeam', action[2])
+                    ticketTotal += userread('tickets')
+                    userwrite(u, 'tickets', 0)
+                distributeTickets(ticketTotal, getAllParticipants())
                 await message.channel.send(embed=tEmbed("Now we are all sons of bitches.", message.author))
 
             if action[0] == 'friendlynuke':
@@ -731,16 +757,22 @@ async def on_message(message):
 
             if action[0] == 'nukemyownteamforrealsies':
                 action[0] = 'nuke' # yeah this is dumb
+                ticketTotal = 0
                 for u in getTeamMembers(action[2]):
                     await u.add_roles(getHome().get_role(role_elim_id))
                     await u.remove_roles(getHome().get_role(action[2]))
                     userwrite(u, 'lastTeam', action[2])
+                    ticketTotal += userread('tickets')
+                    userwrite(u, 'tickets', 0)
+                distributeTickets(ticketTotal, getAllParticipants())
                 await message.channel.send(embed=tEmbed(monologue, message.author))
 
             if action[0] == 'eliminate':
                 u = getHome().get_member(action[2])
                 await u.add_roles(getHome().get_role(role_elim_id))
                 await u.remove_roles(getHome().get_role(userread(u, 'lastTeam')))
+                distributeTickets(userread(u, 'tickets'), getAllParticipants())
+                userwrite(u, 'tickets', 0)
                 await message.channel.send(embed=tEmbed("== TRANSACTION SUCCESSFUL ==\n\nYou have eliminated {0}.".format(u.display_name), message.author))
 
             if action[0] == 'revive':
@@ -910,6 +942,8 @@ async def on_message(message):
             await u.add_roles(getHome().get_role(role_elim_id))
             await u.remove_roles(getHome().get_role(userread(u, 'lastTeam')))
             await message.channel.send("The vote has ended.\n"+extra_comments+"\n{0} is no more.\n".format(u.mention), embed=embed)
+            distributeTickets(userread(u, 'tickets'), getAllParticipants())
+            userwrite(u, 'tickets', 0)
             msg = getStatusMsg()
             if msg:
                 await msg.edit(content=getStatus())
