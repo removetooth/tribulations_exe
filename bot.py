@@ -50,7 +50,9 @@ statedefault = {
     'votingActive': False,
     'votingOpts': [],
     'lastVote': None,
-    'bannedItems': []
+    'bannedItems': [],
+    'statusChannel': 0,
+    'statusMessage': 0
     }
 
 team_ids = [
@@ -69,16 +71,14 @@ team_chan_ids = {
     team_ids[4]: 960996278572040212, # Femboy Association
     team_ids[5]: 961005507408171019  # Sceptile Fans :D
     }
-role_elim_id = 961755681432666202
-chan_prizes_id = 953328018506534965
-chan_bots_id = 953163427101167647
-op_ids = [266389941423046657, 221992874886037504]
-tribulations_id = 951647646102200320
-host_id = 221992874886037504
+role_elim_id = 961755681432666202 # ID of Eliminated role
+chan_prizes_id = 953328018506534965 # ID of Prize Booth channel
+chan_bots_id = 953163427101167647 # ID of bots channel (currently unused)
+op_ids = [266389941423046657, 221992874886037504] # IDs of people who can use admin commands
+tribulations_id = 951647646102200320 # ID of the Tribulations server
+host_id = 221992874886037504 # ID of the host
 
-prizes = ['nuke', 'eliminate', 'revive', 'immunity', 'sabotage', 'fraud', 'thief', 'escape', 'timeout', 'bias', 'swap']
-# transfer is not treated internally as a shop item
-# now that i think about it i can probably just replace this with list(statedefult['shop']) but who fucking cares
+prizes = list(statedefault['shop'])
 
 helptext = """Use "exe (keyword)" to use a command.
 
@@ -107,7 +107,10 @@ helpop = """
 == Admin commands ==
 kill - Stop the bot.
 refresh - Create user data that might not exist, and update user data that does. Recommended to use after manually assigning a team role.
-setlastteam <user> <team> - Set the last team an eliminated member was on. Used for revivals."""
+setlastteam <user> <team> - Set the last team an eliminated member was on. Used for revivals.
+ping [channel id] - Ping. Optionally respond in channel with given ID. Half-intended to help set up the status board.
+status <message/channel> <id> - Set the IDs for the status board message and channel.
+genstatus - Edit the status board with updated information."""
 
 helphost = """
 
@@ -138,6 +141,8 @@ Did you think it would be funny to remove your entire team from the game, only t
 Either way, you're at the mercy of your former teammates now.
 
 I can only pray that you made the right decision."""
+
+vote_instructions = "Vote using the reactions below, or with exe vote (number), if those don't work. exe vote can also be used in DMs."
 
 # == UTILITY FUNCTIONS AND SHIT ==
 
@@ -206,6 +211,14 @@ def getHome():
     # return tribulations as a Guild
     return client.get_guild(tribulations_id)
 
+def getStatusMsg():
+    # return an editable PartialMessage that has the game status on it, if any
+    msg_id = stateread('statusMessage')
+    chan_id = stateread('statusChannel')
+    if chan_id == 0 or msg_id == 0:
+        return None
+    return client.get_channel(chan_id).get_partial_message(msg_id)
+
 def getAllParticipants(eliminated = False):
     # returns a list of all participating members (and, optionally, eliminated members)
     tribulations = getHome()
@@ -219,6 +232,19 @@ def getTeamMembers(team):
     if type(team) in [int, str]:
         team = getHome().get_role(int(team))
     return team.members if team else []
+
+def getStatus():
+    # return a string with the status of each team
+    result = []
+    for tid in team_ids:
+        team = getHome().get_role(tid)
+        elim = getHome().get_role(role_elim_id)
+        members = team.members
+        members_text = ["{0} - Active, {1} tickets".format(i.mention, userread(i, 'tickets')) for i in members]
+        elim_text = ["~~{0} - Eliminated~~".format(i.mention) for i in elim.members if userread(i, 'lastTeam') == tid]
+        roster_text = '\n'.join(members_text + elim_text)
+        result.append("__**{0}**__\n{1}".format(team.name.upper(), roster_text))
+    return '\n\n'.join(result) + '\n'
 
 def tEmbed(text, author = None, colorOverride = None):
     # return a command-line-stylized Embed. yes, it could look better. THIS IS INTENTIONAL.
@@ -303,7 +329,9 @@ async def on_ready():
         quickwrite('state.txt', str(statedefault))
     game = discord.Game("exe help")
     await client.change_presence(status=discord.Status.online, activity=game)
-
+    msg = getStatusMsg()
+    if msg:
+        await msg.edit(content=getStatus())
 
 
 @client.event
@@ -318,10 +346,10 @@ async def on_message(message):
 
         if args[1].lower() in ['help', 'commands', '?']:
             helpmsg = helptext
-            if message.author.id in op_ids:
-                helpmsg = helpmsg + helpop
             if message.author.id == host_id:
                 helpmsg = helpmsg + helphost
+            if message.author.id in op_ids:
+                helpmsg = helpmsg + helpop
             try:
                 await message.author.send(embed=tEmbed(helpmsg))
             except discord.errors.Forbidden:
@@ -358,46 +386,6 @@ async def on_message(message):
             embed = tEmbed("CURRENT BALANCE: " + str(balance) + " TICKETS", message.author)
             await message.channel.send(embed=embed)
             
-
-        elif args[1].lower() == 'transfer':
-            # exe transfer (amount)/all user
-            createDataIfNecessary(message.author)
-            name = getTextArg(args, 3)
-            u = findUser(name)
-            if type(u) == str:
-                await message.channel.send(embed=tEmbed(u, message.author))
-                return
-            if not message.author in getAllParticipants():
-                await message.channel.send(embed=tEmbed('You are not in the game and cannot transfer tickets.', message.author))
-                return
-            if u.id == message.author.id or u.id == client.user.id or not u in getAllParticipants():
-                await message.channel.send(embed=tEmbed('You cannot transfer tickets to this person.', message.author))
-                return
-            tix = userread(message.author, 'tickets')
-            if args[2] == 'all':
-                amt = tix
-            else:
-                try:
-                    amt = int(args[2])
-                except ValueError:
-                    await message.channel.send(embed=tEmbed('Please use a number or "all" for the amount.', message.author))
-                    return
-                if amt > tix:
-                    await message.channel.send(embed=tEmbed("You don't have that many tickets.", message.author))
-                    return
-                elif amt < 0:
-                    await message.channel.send(embed=tEmbed("Nice try.", message.author))
-                    return
-                elif amt == 0:
-                    await message.channel.send(embed=tEmbed("Don't waste my time.", message.author))
-                    return
-            if gethasconfu(message.author):
-                await message.channel.send(embed=tEmbed('You must first confirm or cancel: ' + ', '.join([i[0].upper() for i in getconfu(message.author)]), message.author))
-                return
-            addconf(['transfer', message.author.id, u.id, amt])
-            embed = tEmbed('Transfer {num} tickets to {target}?\nexe confirm - Yes\nexe cancel - No'.format(num=amt,target=u.display_name), message.author)
-            await message.channel.send(embed=embed)
-            
             
         # === PRIZE BOOTH COMMANDS: ===
         
@@ -423,8 +411,46 @@ async def on_message(message):
                 return
             msgOverride = False
             colorOverride = None
-            
 
+            
+            if args[1].lower() == 'transfer':
+                # exe transfer (amount)/all user
+                createDataIfNecessary(message.author)
+                name = getTextArg(args, 3)
+                u = findUser(name)
+                if type(u) == str:
+                    await message.channel.send(embed=tEmbed(u, message.author))
+                    return
+                votingOpts = stateread('votingOpts')
+                if message.author.id in votingOpts:
+                    await message.channel.send(embed=tEmbed('You are being voted on and cannot transfer tickets.', message.author))
+                    return
+                if u.id == message.author.id or u.id == client.user.id or u in votingOpts or not u in getAllParticipants():
+                    await message.channel.send(embed=tEmbed('You cannot transfer tickets to this person.', message.author))
+                    return
+                tix = userread(message.author, 'tickets')
+                if args[2] == 'all':
+                    amt = tix
+                else:
+                    try:
+                        amt = int(args[2])
+                    except ValueError:
+                        await message.channel.send(embed=tEmbed('Please use a number or "all" for the amount.', message.author))
+                        return
+                    if amt > tix:
+                        await message.channel.send(embed=tEmbed("You don't have that many tickets.", message.author))
+                        return
+                    elif amt < 0:
+                        await message.channel.send(embed=tEmbed("Nice try.", message.author))
+                        return
+                    elif amt == 0:
+                        await message.channel.send(embed=tEmbed("Don't waste my time.", message.author))
+                        return
+                addconf(['transfer', message.author.id, u.id, amt])
+                msgOverride = True
+                msg = 'Transfer {num} tickets to {target}?\nexe confirm - Yes\nexe cancel - No'.format(num=amt,target=u.display_name)
+                
+            
             if args[1].lower() == 'nuke':
                 teamName = getTextArg(args, 2)
                 team = findTeam(teamName)
@@ -665,11 +691,13 @@ async def on_message(message):
             actions = [conf.pop(i) for i in range(len(conf)-1,-1,-1) if conf[i][1] == message.author.id]
             action = actions[0] if len(actions) > 0 else None
             statewrite('use_confirmations', conf)
+            doNotTransact = False
 
             if action == None:
                 return
 
             if action[0] == 'transfer':
+                doNotTransact = True
                 createDataIfNecessary(action[2])
                 invoke_amt = userread(action[1], 'tickets')
                 target_amt = userread(action[2], 'tickets')
@@ -688,7 +716,7 @@ async def on_message(message):
                 await message.channel.send(embed=tEmbed(success_msg, message.author))
 
             if action[0] == 'nuke':
-                transact(message.author, 'nuke')
+                
                 for u in getTeamMembers(action[2]):
                     await u.add_roles(getHome().get_role(role_elim_id))
                     await u.remove_roles(getHome().get_role(action[2]))
@@ -696,12 +724,13 @@ async def on_message(message):
                 await message.channel.send(embed=tEmbed("Now we are all sons of bitches.", message.author))
 
             if action[0] == 'friendlynuke':
+                doNotTransact = True
                 addconf(['nukemyownteamforrealsies', action[1], action[2]])
                 finalwarning = "ARE YOU *ABSOLUTELY, 100% SURE* YOU WANT TO DO THIS?\n\nexe confirm - PLEASE\nexe cancel - DO NOT."
                 await message.channel.send(embed=tEmbed(finalwarning, message.author, colorOverride=0xffa500))
 
             if action[0] == 'nukemyownteamforrealsies':
-                transact(message.author, 'nuke')
+                action[0] = 'nuke' # yeah this is dumb
                 for u in getTeamMembers(action[2]):
                     await u.add_roles(getHome().get_role(role_elim_id))
                     await u.remove_roles(getHome().get_role(action[2]))
@@ -709,21 +738,18 @@ async def on_message(message):
                 await message.channel.send(embed=tEmbed(monologue, message.author))
 
             if action[0] == 'eliminate':
-                transact(message.author, 'eliminate')
                 u = getHome().get_member(action[2])
                 await u.add_roles(getHome().get_role(role_elim_id))
                 await u.remove_roles(getHome().get_role(userread(u, 'lastTeam')))
                 await message.channel.send(embed=tEmbed("== TRANSACTION SUCCESSFUL ==\n\nYou have eliminated {0}.".format(u.display_name), message.author))
 
             if action[0] == 'revive':
-                transact(message.author, 'revive')
                 u = getHome().get_member(action[2])
                 await u.add_roles(getHome().get_role(userread(u, 'lastTeam')))
                 await u.remove_roles(getHome().get_role(role_elim_id))
                 await message.channel.send(embed=tEmbed("== TRANSACTION SUCCESSFUL ==\n\nWelcome back, {0}!".format(u.display_name), message.author))
 
             if action[0] == 'peek':
-                transact(message.author, 'peek')
                 channel = getHome().get_channel(action[2])
                 await channel.set_permissions(message.author, read_messages=True, send_messages=False, add_reactions=False)
                 peekers = stateread('peekers')
@@ -732,7 +758,6 @@ async def on_message(message):
                 await message.channel.send(embed=tEmbed("== TRANSACTION SUCCESSFUL ==\n\nYou have special eyes.", message.author))
 
             if action[0] == 'timeout':
-                transact(message.author, 'timeout')
                 u = getHome().get_member(action[2])
                 await u.add_roles(getHome().get_role(role_elim_id))
                 await u.remove_roles(getHome().get_role(userread(u, 'lastTeam')))
@@ -742,33 +767,28 @@ async def on_message(message):
                 await message.channel.send(embed=tEmbed("== TRANSACTION SUCCESSFUL ==\n\nYou have eliminated {0} for this challenge.".format(u.display_name), message.author))
 
             if action[0] == 'sabotage':
-                transact(message.author, 'sabotage')
                 role = getHome().get_role(action[2])
                 statewrite('sabotage', action[2])
                 await message.channel.send(embed=tEmbed("== TRANSACTION SUCCESSFUL ==\n\n{0} can no longer participate in this challenge, and automatically loses.".format(role.name), message.author))
 
             if action[0] == 'bias':
-                transact(message.author, 'bias')
                 role = getHome().get_role(action[2])
                 await message.channel.send(embed=tEmbed("== TRANSACTION SUCCESSFUL ==\n\nYou are the favorite team. For now.", message.author))
                 await client.get_user(host_id).send(str(message.author) + " used Bias and requests info on " + role.name + ".")
 
             if action[0] == 'fraud':
-                transact(message.author, 'fraud')
                 frauds = stateread('frauds')
                 frauds.append(userread(message.author, 'lastTeam'))
                 statewrite('frauds', frauds)
                 await message.channel.send(embed=tEmbed("== TRANSACTION SUCCESSFUL ==\n\nYou suddenly feel like your vote matters. Like, a lot.", message.author))
 
             if action[0] == 'escape':
-                transact(message.author, 'escape')
                 escape = stateread('escape')
                 escape.append(message.author.id)
                 statewrite('escape', escape)
                 await message.channel.send(embed=tEmbed("== TRANSACTION SUCCESSFUL ==\n\nYou will not be part of the next challenge.", message.author))
 
             if action[0] == 'thief':
-                transact(message.author, 'thief')
                 u = getHome().get_member(action[2])
                 role = getHome().get_role(userread(message.author, 'lastTeam'))
                 await u.add_roles(role)
@@ -777,12 +797,17 @@ async def on_message(message):
                 await message.channel.send(embed=tEmbed("== TRANSACTION SUCCESSFUL ==\n\n{target} has been abducted by {team}!".format(target=u.display_name, team=role.name), message.author))
 
             if action[0] == 'immunity':
-                transact(message.author, 'immunity')
                 immunities = stateread('immunities')
                 immunities.append(message.author.id)
                 statewrite('immunities', immunities)
                 await message.channel.send(embed=tEmbed("== TRANSACTION SUCCESSFUL ==\n\nYou feel invincible. Whether or not you are is another matter entirely...", message.author))
 
+            if action[0] in prizes and not doNotTransact:
+                transact(message.author, action[0])
+            msg = getStatusMsg()
+            if msg:
+                await msg.edit(content=getStatus())
+                
 
         # === HOST/ADMIN COMMANDS ===
 
@@ -834,7 +859,7 @@ async def on_message(message):
                 embed = tEmbed(msg)
                 block = '\n'.join(['`{0}` - {1}'.format(i+1, losingTeamMembers[i].mention) for i in range(len(losingTeamMembers))])
                 embed.add_field(name='Chopping Block', value=block)
-                embed.set_footer(text="Vote using the reactions below or with exe vote (number).")
+                embed.set_footer(text=vote_instructions)
                 poll = await channel.send(embed=embed)
                 [await poll.add_reaction(str(i+1)+'\N{COMBINING ENCLOSING KEYCAP}') for i in range(len(losingTeamMembers))]
                 
@@ -885,6 +910,9 @@ async def on_message(message):
             await u.add_roles(getHome().get_role(role_elim_id))
             await u.remove_roles(getHome().get_role(userread(u, 'lastTeam')))
             await message.channel.send("The vote has ended.\n"+extra_comments+"\n{0} is no more.\n".format(u.mention), embed=embed)
+            msg = getStatusMsg()
+            if msg:
+                await msg.edit(content=getStatus())
         
 
         elif args[1].lower() == 'autobalance' and message.author.id == host_id:
@@ -899,6 +927,9 @@ async def on_message(message):
             for i in team_ids:
                 for j in getTeamMembers(i):
                     userwrite(j, "lastTeam", i)
+            msg = getStatusMsg()
+            if msg:
+                await msg.edit(content=getStatus())
             await message.channel.send("data created & updated for all participants")
 
 
@@ -945,6 +976,9 @@ async def on_message(message):
                         return
                     userwrite(member, 'tickets', tickets)
                     await message.channel.send(resp[args[2]].format(num=args[3], subject=team.name))
+            msg = getStatusMsg()
+            if msg:
+                await msg.edit(content=getStatus())
                     
 
         elif args[1].lower() == 'setlastteam' and message.author.id in op_ids:
@@ -984,6 +1018,31 @@ async def on_message(message):
                 bans.append(args[2])
                 await message.channel.send('Item {0} can no longer be bought.'.format(args[2].upper()))
             statewrite('bannedItems', bans)
+
+
+        elif args[1].lower() == 'ping' and message.author.id in op_ids:
+            # intended to help set up the status board
+            dest = getTextArg(args, 2)
+            chan = message.channel
+            if dest.isdigit() and not dest == '':
+                chan = client.get_channel(int(dest))
+            await chan.send('pong')
+
+
+        elif args[1].lower() == 'genstatus' and message.author.id in op_ids:
+            msg = getStatusMsg()
+            if msg:
+                await msg.edit(content=getStatus())
+
+
+        elif args[1].lower() == 'status' and message.author.id in op_ids:
+            if args[2] == 'message':
+                statewrite('statusMessage', int(args[3]))
+            elif args[2] == 'channel':
+                statewrite('statusChannel', int(args[3]))
+            else:
+                await message.channel.send('invalid operation')
+            await message.channel.send('status ' + args[2].lower() + ' id updated')
 
 
         elif args[1].lower() == 'tally' and message.author.id == host_id and stateread('votingActive'):
@@ -1027,7 +1086,7 @@ async def on_reaction_add(reaction, user):
     if reaction.message.author == client.user and \
        len(reaction.message.embeds) == 1 and \
        stateread('votingActive') and \
-       reaction.message.embeds[0].footer.text == "Vote using the reactions below or with exe vote (number)." \
+       reaction.message.embeds[0].footer.text == vote_instructions \
        and reaction.count >= 1 \
        and user in getAllParticipants() \
        and int(reaction.emoji[0]) <= len(stateread("votingOpts")):
