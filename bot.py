@@ -7,8 +7,6 @@ client = discord.Client(intents=intents)
 userdefault = {
     'tickets': 0,
     'lastTeam': None,
-    'immune': False,
-    'escaped': False,
     'vote': None
     }
 
@@ -798,7 +796,7 @@ async def on_message(message):
                     userwrite(j, "lastTeam", i)
             text_tally = '\n'.join(['<@{user}>: {votes} votes'.format(user=i, votes=tally[i]) for i in tally])
             embed = discord.Embed(title='Final Tally', description = text_tally, color = 0x00ff00)
-            extra_comments = "" if not isLoserImmune else "\n<@{0}>'s vote immmunity deflects the loss to <@{1}>.\n".format(loser, second)
+            extra_comments = "" if not isLoserImmune else "\n<@{0}>'s vote immunity deflects the loss to <@{1}>.\n".format(loser, second)
             await u.add_roles(getHome().get_role(role_elim_id))
             await u.remove_roles(getHome().get_role(userread(u, 'lastTeam')))
             await message.channel.send("The vote has ended.\n"+extra_comments+"\n{0} is no more.".format(u.mention), embed=embed)
