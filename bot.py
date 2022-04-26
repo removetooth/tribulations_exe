@@ -214,7 +214,7 @@ def findUser(arg):
         if user:
             return user
         else:
-            return 'Unable to find user named ' + arg
+            return 'Unable to find user named "' + arg + '". (get_member_named() is case sensitive!)'
 
 def findTeam(arg):
     if arg.startswith('<@&'):
@@ -270,11 +270,19 @@ async def on_message(message):
             
 
         elif args[1].lower() in ['balance', 'bal']:
-            createDataIfNecessary(message.author)
-            if not message.author in getAllParticipants():
-                await message.channel.send(embed=tEmbed('You are not in the game.', message.author))
+            u = message.author
+            name = getTextArg(args, 2)
+            if not name == '':
+                u = findUser(name)
+                if type(u) == str:
+                    await message.channel.send(embed=tEmbed(u, message.author))
+                    return
+            if not u in getAllParticipants():
+                msg = '{0} not in the game.'.format("You are" if u == message.author else "That user is")
+                await message.channel.send(embed=tEmbed(msg, message.author))
                 return
-            balance = userread(message.author, 'tickets')
+            createDataIfNecessary(u)
+            balance = userread(u, 'tickets')
             embed = tEmbed("CURRENT BALANCE: " + str(balance) + " TICKETS", message.author)
             await message.channel.send(embed=embed)
             
