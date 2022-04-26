@@ -494,6 +494,9 @@ async def on_message(message):
             elif args[1].lower() == 'swap':
                 swap = stateread('swap_requests')
                 existing = [i for i in swap if i[0] == message.author.id]
+                if stateread('votingActive'):
+                    await message.channel.send(embed=tEmbed("You can't swap right now.", message.author))
+                    return
                 if len(existing) > 0:
                     await message.channel.send(embed=tEmbed("You already have an open swap request.", message.author))
                     return
