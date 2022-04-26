@@ -45,9 +45,10 @@ helptext = """Use "exe (keyword)" to use a command.
 help/commands/? - Show this dialog.
 balance/bal - Check the number of tickets you have.
 shop/prizes - Check the Prize Booth.
-vote <number> - Cast a vote.
+vote <number> - Cast a vote. This can be used in DMs.
 
 == Prize Booth commands ==
+All of these commands can only be used in the prize booth channel (excluding Transfer).
 nuke <team> - Eliminate an entire team.
 eliminate <user> - Eliminate another player.
 revive <user> - Revive a teammate.
@@ -220,7 +221,7 @@ def findTeam(arg):
         return getHome().get_role(int(arg.lstrip('<@&').strip('>')))
     matches = [getHome().get_role(i) for i in team_ids if getHome().get_role(i) and getHome().get_role(i).name.lower() == arg.lower()]
     if len(matches) <= 0:
-        return '"'+teamName+'" does not match the name of any participating teams.'
+        return '"'+arg+'" does not match the name of any participating teams.'
     return matches[0]
 
 def getTextArg(args, start):
@@ -239,7 +240,7 @@ async def on_message(message):
         return
 
     if message.content.startswith(client.user.mention) or \
-       message.content.startswith("exe"):
+       message.content.lower().startswith("exe"):
         args = message.content.split(' ')
         args = [i for i in args if not i == '']
 
@@ -249,8 +250,11 @@ async def on_message(message):
                 helpmsg = helpmsg + helpop
             if message.author.id == host_id:
                 helpmsg = helpmsg + helphost
-            await message.author.send(embed=tEmbed(helpmsg))
-            await message.channel.send(embed=tEmbed("Command list sent to DMS.", message.author))
+            try:
+                await message.author.send(embed=tEmbed(helpmsg))
+            except discord.errors.Forbidden:
+                await message.channel.send(embed=tEmbed("I can't seem to send you the command list. Do you have DMs disabled?", message.author))
+            #await message.channel.send(embed=tEmbed("Command list sent to DMs.", message.author))
             
         
         elif args[1].lower() in ['shop', 'prizes']:
@@ -262,7 +266,7 @@ async def on_message(message):
                 desc=shop[i][2]) for i in shop if shop[i][0] != 0])
             shop_msg = '== PRIZE CORNER ==\n\nUse "exe (item)" to select an item for purchase\n\n' + shop_text
             await message.author.send(embed=tEmbed(shop_msg))
-            await message.channel.send(embed=tEmbed("Prize Corner listings have been sent to your DMS.", message.author))
+            await message.channel.send(embed=tEmbed("Prize Corner listings have been sent to your DMs.", message.author))
             
 
         elif args[1].lower() in ['balance', 'bal']:
@@ -775,7 +779,7 @@ async def on_message(message):
             highest = 0
             loser = 0
             second = 0
-            for i in tally:
+            for i in tally: # there are probably better ways to do this
                 if tally[i] >= highest:
                     second = loser
                     loser = i
