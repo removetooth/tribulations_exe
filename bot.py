@@ -1,3 +1,16 @@
+# TRIBULATIONS.EXE
+# Hastily thrown together in a weekend by riff
+# Made to automate aspects of the Tribulations gameshow
+
+# YES, MY CODE IS ATROCIOUS.
+# YES, THERE ARE TOOLS I COULD HAVE USED TO MAKE THIS CLEANER.
+# I never said I was competent,
+# and I threw this together in a weekend.
+# You should have expected no more than an if-else nightmare.
+
+# Token goes in token.txt.
+# I reset the old one so no one can use it.
+
 import discord, ast, time
 from itertools import chain
 
@@ -9,6 +22,36 @@ userdefault = {
     'lastTeam': None,
     'vote': None
     }
+statedefault = {
+    'shop': {
+        'nuke': [1, 1100, 'Nuclear Bomb. Eliminate an entire team.'],
+        'eliminate': [3, 520, 'Member Elimination. Eliminate another member of your choosing.'],
+        'revive': [3, 420, 'Team Member Revival. Revive a fallen team member.'],
+        'immunity': [3, 220, 'Immunity. Survive a round of elimination voting and have it passed onto 2nd-to-last place.'],
+        'sabotage': [1, 200, 'Sabotage. Disallow a team from competing in any challenge of your choice, netting them an automatic last place.'],
+        'fraud': [3, 150, "Voter Fraud. Buy the ability to have your team's votes doubled when voting to eliminate."],
+        'thief': [-1, 130, 'Thief. In the event of the host announcing an auto-balance, you can "buy" any player of your choice, as long as your team has below 4 members'],
+        'escape': [4, 120, 'Escape Rope. Exempt yourself from one challenge and be barred from elimination and prizes. Cannot be used past the start time of the challenge.'],
+        'timeout': [4, 90, 'For one challenge, you can choose to have a member from another team be eliminated.'],
+        'peek': [3, 65, "Team Peek. Allow a teammate to see inside another team's channel for one challenge."],
+        'bias': [5, 40, 'Host bias. I will explain to you with a tinge of vagueness about the current actions of any team of your choice.'],
+        'transfer': [-1, '??', 'Ticket Transfer. Transfer an allotted amount of tickets to another player with no extra cost.'],
+        'swap': [-1, 0, 'Swap. As long as the two players consent, you can swap teams with no extra charge. Not usable during the process of voting for elimination.']},
+    'swap_requests': [],
+    'use_confirmations': [],
+    'frauds': [],
+    'peekers': [],
+    'timeouts': [],
+    'immunities': [],
+    'escape': [],
+    'sabotage': None,
+    'challengeActive': False,
+    'autobalance': False,
+    'votingActive': False,
+    'votingOpts': [],
+    'lastVote': None,
+    'bannedItems': []
+    }
 
 team_ids = [
     959682463175696414, # Paypal Mafia
@@ -16,9 +59,7 @@ team_ids = [
     960177784641191987, # Starving Artists
     960260637106257920, # Raging Crack Addicts
     960996087244668948, # Femboy Association
-    960381460240547860#,# Sceptile Fans :D
-    #381951357470375936, # test role from testing server
-    #967604532148305970
+    960381460240547860  # Sceptile Fans :D
     ]
 team_chan_ids = {
     team_ids[0]: 959682914944188467, # Paypal Mafia
@@ -26,24 +67,23 @@ team_chan_ids = {
     team_ids[2]: 960178086131949592, # Starving Artists
     team_ids[3]: 960265304443863120, # Raging Crack Addicts
     team_ids[4]: 960996278572040212, # Femboy Association
-    team_ids[5]: 961005507408171019#,# Sceptile Fans :D
-    #team_ids[6]: 967586316579667988,
-    #team_ids[7]: 967586316579667988
+    team_ids[5]: 961005507408171019  # Sceptile Fans :D
     }
-role_elim_id = 961755681432666202#967593430916153344
-chan_prizes_id = 953328018506534965#967586316579667988
+role_elim_id = 961755681432666202
+chan_prizes_id = 953328018506534965
 chan_bots_id = 953163427101167647
 op_ids = [266389941423046657, 221992874886037504]
-tribulations_id = 951647646102200320#373237751039918098
-host_id = 221992874886037504#266389941423046657
+tribulations_id = 951647646102200320
+host_id = 221992874886037504
 
 prizes = ['nuke', 'eliminate', 'revive', 'immunity', 'sabotage', 'fraud', 'thief', 'escape', 'timeout', 'bias', 'swap']
 # transfer is not treated internally as a shop item
+# now that i think about it i can probably just replace this with list(statedefult['shop']) but who fucking cares
 
 helptext = """Use "exe (keyword)" to use a command.
 
 help/commands/? - Show this dialog.
-balance/bal - Check the number of tickets you have.
+balance/bal [user] - Check your (or another user's) ticket balance.
 shop/prizes - Check the Prize Booth.
 vote <number> - Cast a vote. This can be used in DMs.
 
@@ -82,6 +122,7 @@ toggleitem <item> - Toggle the ability to purchase a prize.
 tally - Check the current vote tally."""
 
 monologue = "You goddamn madman."
+# i thought a copypasta would be funny but i think this comes off as too serious so it's unused for now
 """... Fine.
 
 Congratulations. You've used the one nuke of the game on your own team. Was it worth it?
@@ -98,7 +139,10 @@ Either way, you're at the mercy of your former teammates now.
 
 I can only pray that you made the right decision."""
 
+# == UTILITY FUNCTIONS AND SHIT ==
+
 def userwrite(user, tag, value):
+    # write directly to user data
     try:
         f = open('users/'+str(user if type(user) == int else user.id)+'.txt', 'r')
         d = ast.literal_eval(f.read())
@@ -112,10 +156,12 @@ def userwrite(user, tag, value):
     f.close()
 
 def userread(user, tag):
+    # read directly from user data
     with open('users/'+str(user if type(user) == int else user.id)+'.txt', 'r') as f:
         return ast.literal_eval(f.read())[tag]
 
 def createDataIfNecessary(user):
+    # create & update data for a user
     uid = str(user if type(user) in [int, str] else user.id)
     try:
         f = open('users/'+uid+'.txt', 'r')
@@ -131,11 +177,13 @@ def createDataIfNecessary(user):
             f.write(str(userdefault))
 
 def quickwrite(path, content):
+    # i am stupid
     f = open(path,'w')
     f.write(content)
     f.close()
 
 def quickread(path):
+    # just return the contents of a file without having to open, read, and close every time
     try:
         f = open(path,'r')
         content = f.read()
@@ -145,17 +193,21 @@ def quickread(path):
     return content
 
 def statewrite(tag, value):
+    # write directly to the game state
     state = ast.literal_eval(quickread('state.txt'))
     state[tag] = value
     quickwrite('state.txt', str(state))
 
 def stateread(tag):
+    # read directly from the game state
     return ast.literal_eval(quickread('state.txt'))[tag]
 
 def getHome():
+    # return tribulations as a Guild
     return client.get_guild(tribulations_id)
 
 def getAllParticipants(eliminated = False):
+    # returns a list of all participating members (and, optionally, eliminated members)
     tribulations = getHome()
     ids = team_ids + ([role_elim_id] if eliminated else [])
     teams = [tribulations.get_role(i).members for i in ids if tribulations.get_role(i)]
@@ -163,11 +215,13 @@ def getAllParticipants(eliminated = False):
     return users
 
 def getTeamMembers(team):
+    # returns all Members of a team
     if type(team) in [int, str]:
         team = getHome().get_role(int(team))
     return team.members if team else []
 
 def tEmbed(text, author = None, colorOverride = None):
+    # return a command-line-stylized Embed. yes, it could look better. THIS IS INTENTIONAL.
     if author:
         author = author if type(author) == int else author.id
     embed = discord.Embed(
@@ -180,21 +234,30 @@ def tEmbed(text, author = None, colorOverride = None):
     return embed
 
 def addconf(conf):
+    # add a pending confirmation to the game state.
+    # pending confirmations are generally lists, like so
+    # ["action name", (user id), (extra argument 1), (extra argument 2)...]
     confs = stateread("use_confirmations")
     confs.append(conf)
     statewrite("use_confirmations", confs)
 
 def gethasconfu(user):
+    # check if a user has any pending confirmations
     conf = stateread("use_confirmations")
     existing = [i for i in conf if i[1] == (user if type(user) == int else user.id)]
     return len(existing) > 0
 
 def getconfu(user):
+    # get all pending confirmations for a user
     conf = stateread("use_confirmations")
     existing = [i for i in conf if i[1] == (user if type(user) == int else user.id)]
     return existing
 
 def transact(user, item):
+    # deduct an item's price from a user's ticket balance,
+    # then remove 1 from that item's stock if it's finite.
+    # separated into its own function to make exe confirm
+    # easier to read and write for.
     shop = stateread('shop')
     uid = user if type(user) == int else user.id
     amt = userread(uid, 'tickets')
@@ -205,6 +268,7 @@ def transact(user, item):
     userwrite(uid, 'tickets', amt)
 
 def findUser(arg):
+    # try to find a user in Tribulations based on string input
     if arg.startswith('<@') and not arg.startswith('<@&'):
         return getHome().get_member(int(arg.lstrip('<@').strip('>')))
     elif arg.startswith('<@!'):
@@ -228,11 +292,19 @@ def getTextArg(args, start):
     return ' '.join([args[i] for i in range(start,len(args))])
 
 
+
 @client.event
 async def on_ready():
     print('We have logged in as {0.user}'.format(client))
+    try:
+        foo = open('state.txt', 'r')
+        foo.close()
+    except:
+        quickwrite('state.txt', str(statedefault))
     game = discord.Game("exe help")
     await client.change_presence(status=discord.Status.online, activity=game)
+
+
 
 @client.event
 async def on_message(message):
@@ -527,6 +599,7 @@ async def on_message(message):
                 if not u in message.mentions:
                     await message.channel.send(u.mention)
                 msg = "{0} has requested to swap teams with {1}.\n\nexe accept - Swap teams\nexe deny - Don't swap\n\nexe cancel - Cancel request".format(message.author.display_name, u.display_name)
+                
 
             elif args[1].lower() == 'immunity':
                 immunities = stateread('immunities')
@@ -717,7 +790,7 @@ async def on_message(message):
             statewrite('challengeActive', True)
             await message.channel.send("Challenge started. Escape Rope can no longer be used.")
                 
-        # change this to voting later
+        
         elif args[1].lower() == 'callvote' and message.author.id == host_id:
             teamName = getTextArg(args, 2)
             sabotage = stateread('sabotage')
@@ -943,10 +1016,8 @@ async def on_message(message):
             feedback = ('You have changed your vote to {0}.' if vote else 'You have voted for {0}.').format(target.display_name)
             userwrite(message.author, 'vote', opts[index])
             await message.author.send(feedback)
+
             
-            
-                            
-        #await message.channel.send("ack")
                     
 @client.event
 async def on_reaction_add(reaction, user):
@@ -970,5 +1041,5 @@ async def on_reaction_add(reaction, user):
         #await reaction.message.channel.send('ack')
         
 
-client.run('OTY3NDk3MzgxNTA1NTYwNjI2.YmRKJg.XfGDs0p99d6jHZ3QK3EPSgODiX0')
+client.run(quickread('token.txt'))
     
