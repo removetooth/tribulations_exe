@@ -799,7 +799,7 @@ async def on_message(message):
             extra_comments = "" if not isLoserImmune else "\n<@{0}>'s vote immunity deflects the loss to <@{1}>.\n".format(loser, second)
             await u.add_roles(getHome().get_role(role_elim_id))
             await u.remove_roles(getHome().get_role(userread(u, 'lastTeam')))
-            await message.channel.send("The vote has ended.\n"+extra_comments+"\n{0} is no more.".format(u.mention), embed=embed)
+            await message.channel.send("The vote has ended.\n"+extra_comments+"\n{0} is no more.\n".format(u.mention), embed=embed)
         
 
         elif args[1].lower() == 'autobalance' and message.author.id == host_id:
