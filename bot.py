@@ -18,9 +18,9 @@ team_ids = [
     960177784641191987, # Starving Artists
     960260637106257920, # Raging Crack Addicts
     960996087244668948, # Femboy Association
-    960381460240547860,# Sceptile Fans :D
-    381951357470375936, # test role from testing server
-    967604532148305970
+    960381460240547860#,# Sceptile Fans :D
+    #381951357470375936, # test role from testing server
+    #967604532148305970
     ]
 team_chan_ids = {
     team_ids[0]: 959682914944188467, # Paypal Mafia
@@ -28,16 +28,16 @@ team_chan_ids = {
     team_ids[2]: 960178086131949592, # Starving Artists
     team_ids[3]: 960265304443863120, # Raging Crack Addicts
     team_ids[4]: 960996278572040212, # Femboy Association
-    team_ids[5]: 961005507408171019,  # Sceptile Fans :D
-    team_ids[6]: 967586316579667988,
-    team_ids[7]: 967586316579667988
+    team_ids[5]: 961005507408171019#,# Sceptile Fans :D
+    #team_ids[6]: 967586316579667988,
+    #team_ids[7]: 967586316579667988
     }
-role_elim_id = 967593430916153344#961755681432666202
-chan_prizes_id = 967586316579667988#953328018506534965
+role_elim_id = 961755681432666202#967593430916153344
+chan_prizes_id = 953328018506534965#967586316579667988
 chan_bots_id = 953163427101167647
 op_ids = [266389941423046657, 221992874886037504]
-tribulations_id = 373237751039918098#951647646102200320
-host_id = 266389941423046657#221992874886037504
+tribulations_id = 951647646102200320#373237751039918098
+host_id = 221992874886037504#266389941423046657
 
 prizes = ['nuke', 'eliminate', 'revive', 'immunity', 'sabotage', 'fraud', 'thief', 'escape', 'timeout', 'bias', 'swap']
 # transfer is not treated internally as a shop item
