@@ -100,7 +100,7 @@ escape - Save yourself from the next challenge.
 timeout <user> - Temporarily eliminate a single user.
 bias <team> - Request espionage.
 swap <user> - Ask to swap teams with another user.
-transfer <(amount)/all> <user> - Transfer tickets to another user."""
+transfer <(amount)/all> <user, list of users, or team> - Transfer tickets to another user."""
 
 helpop = """
 
@@ -240,10 +240,11 @@ def getStatus():
         team = getHome().get_role(tid)
         elim = getHome().get_role(role_elim_id)
         members = team.members
-        members_text = ["{0} - Active, {1} tickets".format(i.mention, userread(i, 'tickets')) for i in members]
+        ticket_counts = [userread(i, 'tickets') for i in members]
+        members_text = ["{0} - Active, {1} tickets".format(members[i].mention, ticket_counts[i]) for i in range(len(members))]
         elim_text = ["~~{0} - Eliminated~~".format(i.mention) for i in elim.members if userread(i, 'lastTeam') == tid]
         roster_text = '\n'.join(members_text + elim_text)
-        result.append("__**{0}**__\n{1}".format(team.name.upper(), roster_text))
+        result.append("__**{0}**__\n{1}\n**Ticket total:** {2}".format(team.name.upper(), roster_text, sum(ticket_counts)))
     return '\n\n'.join(result) + '\n'
 
 def tEmbed(text, author = None, colorOverride = None):
@@ -438,18 +439,41 @@ async def on_message(message):
             if args[1].lower() == 'transfer':
                 # exe transfer (amount)/all user
                 createDataIfNecessary(message.author)
-                name = getTextArg(args, 3)
-                u = findUser(name)
-                if type(u) == str:
-                    await message.channel.send(embed=tEmbed(u, message.author))
-                    return
                 votingOpts = stateread('votingOpts')
                 if message.author.id in votingOpts:
                     await message.channel.send(embed=tEmbed('You are being voted on and cannot transfer tickets.', message.author))
                     return
-                if u.id == message.author.id or u.id == client.user.id or u in votingOpts or not u in getAllParticipants():
-                    await message.channel.send(embed=tEmbed('You cannot transfer tickets to this person.', message.author))
-                    return
+
+                # this has gotten absolutely ridiculous
+                inStr = getTextArg(args, 3)
+                targets = []
+                cantTransferMsg = 'You cannot transfer tickets to one or more of these recipients.'
+                if ', ' in inStr:
+                    names = inStr.split(', ')
+                    for name in names:
+                        u = findUser(name)
+                        if type(u) == str:
+                            await message.channel.send(embed=tEmbed(u, message.author))
+                            return
+                        targets.append(u)
+                else:
+                    u = findUser(inStr)
+                    if type(u) == str:
+                        team = findTeam(inStr)
+                        if type(team) == str:
+                            msg = 'Unable to find user or team with name "{0}".'.format(inStr)
+                            await message.channel.send(embed=tEmbed(msg, message.author))
+                            return
+                        targets = getTeamMembers(team)
+                    else:
+                        targets = [u]
+                        antTransferMsg = 'You cannot transfer tickets to this person.'
+
+                for u in targets:  
+                    if u.id == message.author.id or u.id == client.user.id or u in votingOpts or not u in getAllParticipants():
+                        await message.channel.send(embed=tEmbed(cantTransferMsg, message.author))
+                        return
+                
                 tix = userread(message.author, 'tickets')
                 if args[2] == 'all':
                     amt = tix
@@ -468,9 +492,12 @@ async def on_message(message):
                     elif amt == 0:
                         await message.channel.send(embed=tEmbed("Don't waste my time.", message.author))
                         return
-                addconf(['transfer', message.author.id, u.id, amt])
+                addconf(['transfer', message.author.id, [u.id for u in targets], amt])
                 msgOverride = True
-                msg = 'Transfer {num} tickets to {target}?\nexe confirm - Yes\nexe cancel - No'.format(num=amt,target=u.display_name)
+                msg = '{num} tickets will be transferred to: {targets}\nDo you wish to proceed?\n\nexe confirm - Yes\nexe cancel - No'.format(
+                    num=amt,
+                    targets=', '.join([u.display_name for u in targets])
+                    )
                 
             
             if args[1].lower() == 'nuke':
@@ -723,18 +750,22 @@ async def on_message(message):
 
             if action[0] == 'transfer':
                 doNotTransact = True
-                createDataIfNecessary(action[2])
+                [createDataIfNecessary(i) for i in action[2]]
                 invoke_amt = userread(action[1], 'tickets')
-                target_amt = userread(action[2], 'tickets')
+                distributeTickets(invoke_amt, action[2])
                 invoke_amt -= action[3]
-                target_amt += action[3]
                 userwrite(action[1], 'tickets', invoke_amt)
-                userwrite(action[2], 'tickets', target_amt)
-                success_template = "== TRANSACTION SUCCESSFUL ==\n{invoker} sent {amt} tickets to {target}\n\nBalance after transfer:\n\n{invoker}: {i_amt} tickets\n{target}: {t_amt} tickets"
+                target_amt = userread(action[0], 'tickets')
+                if len(action[2]) <= 0:
+                    success_template = "== TRANSACTION SUCCESSFUL ==\n{invoker} sent {amt} tickets to {target}\n\nBalance after transfer:\n\n{invoker}: {i_amt} tickets\n{target}: {t_amt} tickets"
+                else:
+                    success_template = "== TRANSACTION SUCCESSFUL ==\n{invoker} distributed {amt} tickets between: {targets}"
+                names = [getHome().get_member(i).display_name for i in action[2]]
                 success_msg = success_template.format(
                     amt = action[3],
                     invoker = getHome().get_member(action[1]).display_name,
-                    target = getHome().get_member(action[2]).display_name,
+                    target = names[0],
+                    targets = ', '.join(names),
                     i_amt = invoke_amt,
                     t_amt = target_amt
                     )
@@ -976,7 +1007,7 @@ async def on_message(message):
 
         elif args[1].lower() == 'tickets':
             if not message.author.id == host_id:
-                await message.channel.send(embed=tEmbed("This command is only usable by the host to manage tickets.\nIf you're trying to transfer tickets, use this instead:\nexe transfer <(amount)/all> <user>", message.author))
+                await message.channel.send(embed=tEmbed("\"tickets\" is only usable by the host to manage tickets.\nIf you're trying to transfer tickets, use \"transfer\" instead:\nexe transfer <(amount)/all> <user, list of users, or team>", message.author))
                 return
             # exe tickets give/remove/set amount user/team
             resp = {
@@ -1014,7 +1045,7 @@ async def on_message(message):
                         await message.channel.send("You probably shouldn't do that. (TODO: add a confirmation dialog)")
                         return
                     userwrite(member, 'tickets', tickets)
-                    await message.channel.send(resp[args[2]].format(num=args[3], subject=team.name))
+                await message.channel.send(resp[args[2]].format(num=args[3], subject=team.name))
             msg = getStatusMsg()
             if msg:
                 await msg.edit(content=getStatus())
