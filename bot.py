@@ -24,19 +24,19 @@ userdefault = {
     }
 statedefault = {
     'shop': {
-        'nuke': [1, 1100, 'Nuclear Bomb. Eliminate an entire team.'],
-        'eliminate': [3, 520, 'Member Elimination. Eliminate another member of your choosing.'],
-        'revive': [3, 420, 'Team Member Revival. Revive a fallen team member.'],
-        'immunity': [3, 220, 'Immunity. Survive a round of elimination voting and have it passed onto 2nd-to-last place.'],
-        'sabotage': [1, 200, 'Sabotage. Disallow a team from competing in any challenge of your choice, netting them an automatic last place.'],
-        'fraud': [3, 150, "Voter Fraud. Buy the ability to have your team's votes doubled when voting to eliminate."],
-        'thief': [-1, 130, 'Thief. In the event of the host announcing an auto-balance, you can "buy" any player of your choice, as long as your team has below 4 members'],
-        'escape': [4, 120, 'Escape Rope. Exempt yourself from one challenge and be barred from elimination and prizes. Cannot be used past the start time of the challenge.'],
-        'timeout': [4, 90, 'For one challenge, you can choose to have a member from another team be eliminated.'],
-        'peek': [3, 65, "Team Peek. Allow a teammate to see inside another team's channel for one challenge."],
-        'bias': [5, 40, 'Host bias. I will explain to you with a tinge of vagueness about the current actions of any team of your choice.'],
-        'transfer': [-1, 0, 'Ticket Transfer. Transfer an allotted amount of tickets to another player with no extra cost.'],
-        'swap': [-1, 0, 'Swap. As long as the two players consent, you can swap teams with no extra charge. Not usable during the process of voting for elimination.']},
+        'nuke': [1, 1100, 'Nuclear Bomb. Eliminate an entire team.', 0],
+        'eliminate': [3, 520, 'Member Elimination. Eliminate another member of your choosing.', 0],
+        'revive': [3, 420, 'Team Member Revival. Revive a fallen team member.', 0],
+        'immunity': [3, 220, 'Immunity. Survive a round of elimination voting and have it passed onto 2nd-to-last place.', 0],
+        'sabotage': [1, 200, 'Sabotage. Disallow a team from competing in any challenge of your choice, netting them an automatic last place.', 0],
+        'fraud': [3, 150, "Voter Fraud. Buy the ability to have your team's votes doubled when voting to eliminate.", 0],
+        'thief': [-1, 130, 'Thief. In the event of the host announcing an auto-balance, you can "buy" any player of your choice, as long as your team has below 4 members', 0],
+        'escape': [4, 120, 'Escape Rope. Exempt yourself from one challenge and be barred from elimination and prizes. Cannot be used past the start time of the challenge.', 0],
+        'timeout': [4, 90, 'For one challenge, you can choose to have a member from another team be eliminated.', 0],
+        'peek': [3, 65, "Team Peek. Allow a teammate to see inside another team's channel for one challenge.", 0],
+        'bias': [5, 40, 'Host bias. I will explain to you with a tinge of vagueness about the current actions of any team of your choice.', 0],
+        'transfer': [-1, 0, 'Ticket Transfer. Transfer an allotted amount of tickets to another player with no extra cost.', 0],
+        'swap': [-1, 0, 'Swap. As long as the two players consent, you can swap teams with no extra charge. Not usable during the process of voting for elimination.', 0]},
     'swap_requests': [],
     'use_confirmations': [],
     'frauds': [],
@@ -88,7 +88,7 @@ shop/prizes - Check the Prize Booth.
 vote <number> - Cast a vote. This can be used in DMs.
 
 == Prize Booth commands ==
-All of these commands can only be used in the prize booth channel (excluding Transfer).
+All of these commands can only be used in the prize booth and bot channels.
 nuke <team> - Eliminate an entire team.
 eliminate <user> - Eliminate another player.
 revive <user> - Revive a teammate.
@@ -120,7 +120,7 @@ start - Mark the start of a challenge. Disables Escape Rope.
 callvote <team> - Call a vote against a team. Ends the active challenge.
 endvote - End the voting period. Eliminates the loser.
 autobalance - Toggle the autobalance period on and off. Enables/disables Thief.
-changeprize <item> <stock/cost/desc> <value> - Edit prizes.
+changeprize <item> <stock/cost/raiseby/desc> <value> - Edit prizes. -1 stock is infinite use.
 toggleitem <item> - Toggle the ability to purchase a prize.
 tally - Check the current vote tally."""
 
@@ -284,12 +284,14 @@ def transact(user, item):
     # then remove 1 from that item's stock if it's finite.
     # separated into its own function to make exe confirm
     # easier to read and write for.
+    item = item.lower()
     shop = stateread('shop')
     uid = user if type(user) == int else user.id
     amt = userread(uid, 'tickets')
     if shop[item][0] > 0:
         shop[item][0] -= 1
     amt -= shop[item][1]
+    shop[item][1] += shop[item][3]
     statewrite('shop', shop)
     userwrite(uid, 'tickets', amt)
 
@@ -409,10 +411,10 @@ async def on_message(message):
             
         # === PRIZE BOOTH COMMANDS: ===
         
-        elif args[1].lower() in prizes and message.channel.id == chan_prizes_id:
+        elif args[1].lower() in prizes and message.channel.id in [chan_prizes_id, chan_bots_id]:
             
             if message.author.id in stateread('escape') or not message.author in getAllParticipants():
-                await message.channel.send(embed=tEmbed('You are not in the game and cannot purchase this item.', message.author))
+                await message.channel.send(embed=tEmbed('You are not in the game.', message.author))
                 return
             amt = userread(message.author, 'tickets')
             shop = stateread('shop')
@@ -972,7 +974,10 @@ async def on_message(message):
             await client.close()
             
 
-        elif args[1].lower() == 'tickets' and message.author.id == host_id:
+        elif args[1].lower() == 'tickets':
+            if not message.author.id == host_id:
+                await message.channel.send(embed=tEmbed("This command is only usable by the host to manage tickets.\nIf you're trying to transfer tickets, use this instead:\nexe transfer <(amount)/all> <user>", message.author))
+                return
             # exe tickets give/remove/set amount user/team
             resp = {
                 'give': 'Granted {num} tickets to {subject}.',
@@ -1029,12 +1034,15 @@ async def on_message(message):
         elif args[1].lower() == 'changeprize' and message.author.id == host_id:
             shop = stateread('shop')
             args[2] = args[2].lower()
+            args[3] = args[3].lower()
             if args[3] == 'stock':
                 shop[args[2]][0] = int(args[4])
             elif args[3] == 'cost':
                 shop[args[2]][1] = int(args[4])
             elif args[3] == 'desc':
                 shop[args[2]][2] = getTextArg(args,4)
+            elif args[3] == 'raiseby':
+                shop[args[2]][3] = int(args[4])
             else:
                 await message.channel.send('invalid operation')
                 return
