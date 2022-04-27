@@ -1,3 +1,5 @@
 state.txt
 token.txt
 users
+.vs
+__pycache__
