@@ -238,6 +238,8 @@ def getStatus():
     result = []
     for tid in team_ids:
         team = getHome().get_role(tid)
+        if not team:
+            continue
         elim = getHome().get_role(role_elim_id)
         members = team.members
         ticket_counts = [userread(i, 'tickets') for i in members]
@@ -327,18 +329,18 @@ def distributeTickets(amt, users):
     # CRACKPOT IDEA
     # calculate number of tickets modulo number of users
     rem = amt % len(users)
-    # subtract that from the number of tickets to get the base amount to give everyone
-    base = amt - rem
+    # subtract the remainder from the amount and divide by number of users
+    base = (amt - rem) / len(users)
     # choose rem amount of users at random to get 1 more ticket than base
     extras = [users.pop(random.randint(0, len(users)-1)) for i in range(rem)] # (this automatically separates them)
     for u in extras:
         tickets = userread(u, "tickets")
-        tickets += (base + 1)
+        tickets += int(base + 1)
         userwrite(u, "tickets", tickets)
     # give base amount of tickets to everyone else
     for u in users:
         tickets = userread(u, "tickets")
-        tickets += base
+        tickets += int(base)
         userwrite(u, "tickets", tickets)
 
 
@@ -752,10 +754,9 @@ async def on_message(message):
                 doNotTransact = True
                 [createDataIfNecessary(i) for i in action[2]]
                 invoke_amt = userread(action[1], 'tickets')
-                distributeTickets(invoke_amt, action[2])
                 invoke_amt -= action[3]
                 userwrite(action[1], 'tickets', invoke_amt)
-                target_amt = userread(action[0], 'tickets')
+                target_amt = userread(action[2][0], 'tickets')
                 if len(action[2]) <= 0:
                     success_template = "== TRANSACTION SUCCESSFUL ==\n{invoker} sent {amt} tickets to {target}\n\nBalance after transfer:\n\n{invoker}: {i_amt} tickets\n{target}: {t_amt} tickets"
                 else:
@@ -769,6 +770,7 @@ async def on_message(message):
                     i_amt = invoke_amt,
                     t_amt = target_amt
                     )
+                distributeTickets(action[3], action[2])
                 await message.channel.send(embed=tEmbed(success_msg, message.author))
 
             if action[0] == 'nuke':
