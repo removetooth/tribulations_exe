@@ -210,7 +210,7 @@ def checkPurchaseErrors(user, prize, ignoreConf = False):
     if uid in stateread('escape') or not uid in [i.id for i in getAllParticipants()]:
         return 'You are not in the game.'
     createDataIfNecessary(uid)
-    amt = userread(message.author, 'tickets')
+    amt = userread(uid, 'tickets')
     shop = stateread('shop')
     bans = stateread('bannedItems')
     if prize.lower() in bans:
@@ -219,8 +219,8 @@ def checkPurchaseErrors(user, prize, ignoreConf = False):
         return "You don't have enough tickets for this prize."
     if shop[prize.lower()][0] == 0:
         return "This prize is out of stock."
-    if gethasconfu(message.author) and not ignoreConf:
-        return 'You must first confirm or cancel: ' + ', '.join([i[0].upper() for i in getconfu(user)])
+    if gethasconfu(uid) and not ignoreConf:
+        return 'You must first confirm or cancel: ' + ', '.join([i[0].upper() for i in getconfu(uid)])
     return None
 
 async def updateStatusBoard():

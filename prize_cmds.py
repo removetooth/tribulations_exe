@@ -43,7 +43,7 @@ async def cmdTRANSFER(message, args):
         if type(u) == str:
             team = findTeam(inStr)
             if type(team) == str:
-                msg = 'Unable to find user or team with name "{0}".'.format(inStr)
+                msg = 'Unable to find user or team with name "{0}. (get_user_named() is case sensitive!)".'.format(inStr)
                 await message.channel.send(embed=tEmbed(msg, message.author))
                 return
             targets = [i for i in getTeamMembers(team) if i.id != message.author.id] # exclude self from team targeting
@@ -99,7 +99,7 @@ async def confTRANSFER(message, action):
     distributeTickets(action[3], action[2])
     # generate and send an appropriate success message
     target_amt = userread(action[2][0], 'tickets') # leftover from only-one-person-at-a-time transfer
-    if len(action[2]) <= 0:
+    if len(action[2]) <= 1:
         success_template = "== TRANSACTION SUCCESSFUL ==\n{invoker} sent {amt} tickets to {target}\n\nBalance after transfer:\n\n{invoker}: {i_amt} tickets\n{target}: {t_amt} tickets"
     else:
         success_template = "== TRANSACTION SUCCESSFUL ==\n{invoker} distributed {amt} tickets between: {targets}"
