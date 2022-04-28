@@ -220,7 +220,7 @@ def checkPurchaseErrors(user, prize, ignoreConf = False):
     if shop[prize.lower()][0] == 0:
         return "This prize is out of stock."
     if gethasconfu(message.author) and not ignoreConf:
-        return 'You must first confirm or cancel: ' + ', '.join([i[0].upper() for i in getconfu(message.author)])
+        return 'You must first confirm or cancel: ' + ', '.join([i[0].upper() for i in getconfu(user)])
     return None
 
 async def updateStatusBoard():
