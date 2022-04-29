@@ -192,7 +192,7 @@ def distributeTickets(amt, users):
     # choose rem amount of users at random to get 1 more ticket than base
     # (also make a copy of the list so we don't actually modify the list that was passed in)
     users_editsafe = users.copy()
-    extras = [users_editsafe.pop(random.randint(0, len(users)-1)) for i in range(rem)] # (this automatically separates them)
+    extras = [users_editsafe.pop(random.randint(0, len(users_editsafe)-1)) for i in range(rem)] # (this automatically separates them)
     for u in extras:
         tickets = userread(u, "tickets")
         tickets += int(base + 1)
