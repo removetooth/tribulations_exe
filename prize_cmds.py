@@ -129,6 +129,7 @@ async def cmdNUKE(message, args):
         await message.channel.send(embed=tEmbed(team, message.author))
         return
     colorOverride = 0x00ff00
+    shop = stateread('shop')
     if team in message.author.roles:
         text = "/!\\ NUCLEAR WARHEAD ARMED /!\\\n\nWARNING: YOU ARE ABOUT TO NUKE YOUR OWN GODDAMN TEAM.\n\nCONTINUING MAY HAVE VERY UNDESIRABLE CONSEQUENCES.\nARE YOU SURE YOU WANT TO CONTINUE?\n\nexe confirm - yes\nexe cancel - NO NO NO NO NO NO NO"
         colorOverride = 0xff0000

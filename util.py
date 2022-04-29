@@ -229,6 +229,10 @@ async def updateStatusBoard():
         await msg.edit(content=getStatus())
 
 async def sendConfMessage(message, text, msgOverride = False, colorOverride = 0x00ff00):
+    # lotta broken references here so i'm gonna fix it the stupid way
+    shop = stateread('shop')
+    args = message.content.split(' ')
+    args = [i for i in args if not i == '']
     msg = text
     if not msgOverride:
         msg = msg + "\n\nThis will cost {cost} tickets.{stock}\nDo you wish to continue?\nexe confirm - Yes\nexe cancel - No".format(
